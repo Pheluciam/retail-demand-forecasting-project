@@ -1,0 +1,153 @@
+# =============================================================================
+# Secrets — NEVER commit these
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+config.local.*
+profiles.yml          # dbt connection profiles — contain credentials
+kaggle.json           # Kaggle API token
+
+# Azure / Snowflake / cloud credentials
+*.credentials
+azure.conf
+snowflake.conf
+
+# =============================================================================
+# Data — too large or sensitive to commit
+# =============================================================================
+data/raw/
+data/processed/
+data/staging/
+*.csv.gz
+*.parquet
+*.tsv
+m5_data/
+sales_train_validation.csv
+sales_train_evaluation.csv
+sell_prices.csv
+calendar.csv
+sample_submission.csv
+
+# Allow small reference / lookup files inside data/
+!data/reference/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env_*/
+project2_venv/
+*_venv/
+
+# =============================================================================
+# dbt
+# =============================================================================
+target/
+dbt_packages/
+dbt_modules/
+logs/
+.user.yml
+
+# =============================================================================
+# Airflow
+# =============================================================================
+airflow/logs/
+airflow/dags/__pycache__/
+airflow/plugins/__pycache__/
+airflow.cfg
+airflow.db
+webserver_config.py
+standalone_admin_password.txt
+
+# =============================================================================
+# Docker
+# =============================================================================
+.docker/
+
+# =============================================================================
+# Power BI
+# =============================================================================
+# .pbix files SHOULD be committed for portfolio purposes
+# Lock and temp files should not
+*.pbix.lock
+*.pbix.bak
+~$*.pbix
+
+# =============================================================================
+# IDE / editor
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# Allow shared VS Code settings if useful
+!.vscode/settings.json.example
+
+# =============================================================================
+# Operating system
+# =============================================================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+.directory
+.Trash-*
+
+# =============================================================================
+# Logs and temp
+# =============================================================================
+*.log
+*.tmp
+tmp/
+temp/
+.cache/
+
+# =============================================================================
+# Jupyter notebooks (if used)
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
