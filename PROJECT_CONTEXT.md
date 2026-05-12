@@ -18,17 +18,17 @@
 
 ## Pre-flight check results
 
-| Check | Result | Implication |
-|---|---|---|
-| RAM | 31.7 GB total | Full Docker stack supported, no compromises needed |
-| Docker Desktop | ✅ Installed (v29.4.2), WSL 2 backend | Ready for Phase 3 (Airflow) |
-| Python | ✅ 3.11.9 available | Sufficient (need 3.11+) |
-| Git / GitHub | ✅ Working, repo created and pushed | Public repo live |
-| Kaggle account | ✅ Active, phone verified | Can use API |
-| Kaggle API token | ✅ kaggle.json in `C:\Users\Phil\.kaggle\` | Ready for scripted download |
-| Azure subscription | ✅ Active, Owner role, $0 current spend | Will use Azure SQL Database from Phase 1 |
-| Power BI Service licence | None — Power BI Free Desktop only | Build in Desktop, screenshots in README |
-| Snowflake | NOT signed up yet (intentional) | Sign up in Phase 2 only |
+| Check                    | Result                                     | Implication                                        |
+| ------------------------ | ------------------------------------------ | -------------------------------------------------- |
+| RAM                      | 31.7 GB total                              | Full Docker stack supported, no compromises needed |
+| Docker Desktop           | ✅ Installed (v29.4.2), WSL 2 backend      | Ready for Phase 3 (Airflow)                        |
+| Python                   | ✅ 3.11.9 available                        | Sufficient (need 3.11+)                            |
+| Git / GitHub             | ✅ Working, repo created and pushed        | Public repo live                                   |
+| Kaggle account           | ✅ Active, phone verified                  | Can use API                                        |
+| Kaggle API token         | ✅ kaggle.json in `C:\Users\Phil\.kaggle\` | Ready for scripted download                        |
+| Azure subscription       | ✅ Active, Owner role, $0 current spend    | Will use Azure SQL Database from Phase 1           |
+| Power BI Service licence | None — Power BI Free Desktop only          | Build in Desktop, screenshots in README            |
+| Snowflake                | NOT signed up yet (intentional)            | Sign up in Phase 2 only                            |
 
 ---
 
