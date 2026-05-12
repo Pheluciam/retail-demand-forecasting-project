@@ -8,11 +8,26 @@
 
 ## Where we are right now
 
-**Current phase:** Phase 1 — **IN PROGRESS** 🟡 (first half complete)
+**Current phase:** Phase 1 — ✅ **COMPLETE** (2026-05-13)
 
-**Last action (2026-05-12):** Azure infrastructure provisioned end-to-end on the Azure Free SQL Database offer. Resource Group, $50 AUD budget alert, Azure SQL Database Serverless (Free tier — 100k vCore-sec + 32 GB storage free for life of subscription, with overage billing disabled), firewall rule for client IP, and connection verified via portal Query Editor (`SELECT @@VERSION` returned `Microsoft SQL Azure 12.0.2000.8`). M5 dataset downloaded from Kaggle to `data/raw/` — all 5 CSVs present (~450 MB uncompressed). Python venv set up with `kaggle`, `pyodbc`, `pandas`, `python-dotenv`, `sqlalchemy` in `requirements.txt`. Secrets in local `.env` (gitignored); template in `.env.example` (committed).
+**Last action (2026-05-13 morning):** Verified the overnight bulk load completed successfully. All 3 raw tables landed with correct row counts:
 
-**Next session starts with:** Phase 1 second half — bulk-load the 5 M5 CSVs from `data/raw/` into Azure SQL Database. Wide-format sales tables go in as-is (unpivot happens in dbt staging later, per locked decision).
+| Table | Row count | Status |
+|---|---|---|
+| `raw.calendar` | 1,969 | ✅ verified |
+| `raw.sell_prices` | 6,841,121 | ✅ verified |
+| `raw.sales_train` | 59,181,090 | ✅ verified |
+
+Schema verification (column counts) and eyeball checks on sample rows all passed via `sql/verify/01_phase1_load_verification.sql` (new file, 5-section verification suite).
+
+**Final runtime stats:** total elapsed ~12.2 hours.
+- calendar: ~5 sec
+- sell_prices: 73.1 min (avg 1,560 rows/sec)
+- sales_train: 659.6 min (~11 h, avg 1,495 rows/sec — Free Serverless 2 vCores throughput cap)
+
+**One bookkeeping note from the run:** the script's `EXPECTED_ROWS["sales_train"]` constant had an off-by-1000 arithmetic error (set to 59,180,090; correct value 59,181,090). Verification correctly raised a `MISMATCH`/`ValueError` — but against the wrong baseline. Constant since corrected in source; lesson captured in `LEARNINGS.md` under *Mistakes & diagnoses*.
+
+**Next session starts with:** Phase 2 — Snowflake signup + Python extract job (Azure SQL → Snowflake RAW).
 
 ---
 
@@ -59,32 +74,50 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 
 ---
 
-## Immediate next steps (Phase 1, second half)
+## Phase 1 — full checklist (all complete)
 
-1. ✅ ~~Sign in to Azure portal, create a Resource Group for this project~~
-2. ✅ ~~Set up budget alert at $50/month~~ (set at $50 AUD)
-3. ✅ ~~Provision Azure SQL Database (Serverless General Purpose tier with auto-pause)~~ — on Free offer
-4. ✅ ~~Configure firewall rule to allow your IP~~ — handled inline during provisioning; current IP `115.69.3.187` whitelisted
-5. ✅ ~~Download M5 dataset from Kaggle (using kaggle CLI)~~
-6. ✅ ~~Create Python venv and install required packages~~ — `.venv` created with `kaggle` installed; full `requirements.txt` to be installed at start of next session via `pip install -r requirements.txt`
-7. ⬜ **Load M5 raw CSVs into Azure SQL Database** ← next session starts here
-8. ⬜ Verify row counts and sample data
+1. ✅ Resource Group + $50 AUD budget alert
+2. ✅ Azure SQL Database (Serverless General Purpose Free tier with auto-pause)
+3. ✅ Firewall rule for client IP (`115.69.3.187`)
+4. ✅ M5 dataset downloaded from Kaggle to `data/raw/`
+5. ✅ Python venv + `requirements.txt` installed
+6. ✅ Smoke-test pyodbc connection to Azure SQL
+7. ✅ 3 raw tables created (`raw.calendar`, `raw.sell_prices`, `raw.sales_train`) — DDL idempotent, PAGE-compressed
+8. ✅ Loader script (`scripts/load_m5_to_azure_sql.py`) — pandas + SQLAlchemy + fast_executemany
+9. ✅ Overnight bulk load — 3 tables, ~12 hours total
+10. ✅ Post-load verification — row counts + schema + eyeball sample rows all OK (`sql/verify/01_phase1_load_verification.sql`)
+11. ✅ Documentation closeout — LEARNINGS + PROJECT_CONTEXT + CODE_QUALITY updated
 
-### Quick start for next session
+**Overnight-stability power settings reverted on 2026-05-13 morning.** Nothing pending.
+
+---
+
+## Phase 2 starting point
+
+**Phase 2 = Snowflake + extraction.** Estimated 2–3 sessions.
+
+### Pre-Phase-2 reminder (read before starting next session)
+
+- **DO NOT sign up for Snowflake yet outside a Phase 2 session.** The free trial is a 30-day clock that starts on signup. Sign up *first thing* when Phase 2 starts, then build immediately so the clock counts toward useful work, not setup downtime.
+
+### Phase 2 session 1 plan (next session)
+
+1. Sign up for Snowflake free trial → `signup.snowflake.com`
+   - Pick **AWS** as the cloud, **Standard** edition, region closest to AU East
+2. In Snowflake, provision: warehouse `WH_RETAIL` (XS), database `RETAIL_DB`, schema `RAW`, role `RETAIL_ENGINEER`
+3. Add Snowflake connection details to `.env` (the placeholders already exist in `.env.example`)
+4. Add `snowflake-connector-python` to `requirements.txt` and install
+5. Write `scripts/extract_azure_to_snowflake.py` — date-parameterised from day one (takes `--run-date` arg) per locked decision (simulated freshness)
+6. Test extract on `raw.calendar` first (smallest), then sell_prices, then sales_train
+
+### Quick start for the Phase 2 session
 
 ```powershell
 cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+# Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
+# Then start Phase 2 step 1 — Snowflake signup
 ```
-
-Then write a Python script using `pyodbc` + `pandas` to read each CSV from `data/raw/` and bulk-insert into Azure SQL. Wide-format sales tables go in as-is. Connection details are in `.env`.
-
-Estimated effort for Phase 1 second half: 1 session.
-
-### Known issue to fix at session start
-
-VS Code's default Python interpreter path still points to the deleted Project #1 venv (`C:\Users\Phil\Documents\CDC_NT_ETL\.venv`). Fix by `Ctrl+Shift+P` → `Python: Select Interpreter` → pick `.venv` inside this project.
 
 ---
 

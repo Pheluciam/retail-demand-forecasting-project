@@ -2,7 +2,7 @@
 
 > A production-grade retail demand-planning analytics platform built on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 Forecasting) is ingested from Azure SQL Database into Snowflake via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
-**Status:** 🚧 In development — Phase 0 (Setup)
+**Status:** 🚧 In development — Phase 1 complete (Azure SQL source database loaded with M5 data: 1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train). Phase 2 (Snowflake + extraction) next.
 
 ---
 
@@ -72,6 +72,7 @@ The M5 dataset (~58M rows of daily sales across 30,000 SKUs and 10 stores) is la
 
 - **`PROJECT_PLAN.md`** — full plan, scope, timeline, locked decisions, risks
 - **`PROJECT_CONTEXT.md`** — current state and immediate next steps
+- **`CODE_QUALITY.md`** — the 9-point code-quality checklist applied to every non-trivial script in this repo, with concrete examples from the codebase
 - **`LEARNINGS.md`** — running journal of lessons learned across the project
 - **`TEACHING_PREFERENCES.md`** — working-style preferences (relevant to AI-assisted development workflow)
 

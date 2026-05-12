@@ -46,6 +46,25 @@ This is the big one — set the default and Claude will respect it.
 - When I say "just show me the answer", do that without the teaching detour: <yes> Yes.
 - **SQL code style: ALL keywords in CAPITALS** (`SELECT`, `FROM`, `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, etc.). Applies to all SQL dialects — Postgres, MS SQL Server / T-SQL, Snowflake, dbt models. Same rule for DDL keywords (`CREATE TABLE`, `ALTER`, `DROP`).
 
+## Code quality checklist
+
+Added 2026-05-12. Before any non-trivial script is considered "done", Claude should explicitly audit it against the criteria below and surface findings (good or bad). Be honest where the script is already at the right state — **don't gold-plate just because the audit is being requested.**
+
+The six criteria I want checked every time:
+
+1. **Currency.** Uses current language/dialect idioms; no deprecated patterns (e.g. `pathlib` over `os.path`; f-strings over `%s`; `DROP TABLE IF EXISTS` over pre-2016 `OBJECT_ID` checks where Azure SQL supports the modern form).
+2. **Compactness.** Concise but not clever golf — readability never sacrificed for brevity.
+3. **Resource efficiency (cost-aware).** Minimises CPU, memory, network, and storage. Free-tier-aware: compress large tables, use tight types (`TINYINT`/`SMALLINT` where they fit), avoid unnecessary indexes during bulk load.
+4. **Privacy & security.** Secrets externalised to `.env` (gitignored). TLS in transit (`Encrypt=yes`). Server cert validation on (`TrustServerCertificate=no`). Connection timeouts bounded. No passwords or PII in stdout/logs. No string-concatenated SQL where injection could occur.
+5. **Workflow consistency.** Matches the project's conventions: `snake_case`, `NVARCHAR` for strings, `raw` schema in source DB / `RAW` in Snowflake, naming patterns from `PROJECT_PLAN.md`.
+6. **Upstream/downstream contract.** Inputs match what the upstream source actually produces (column names, types, encoding, NULL conventions). Outputs match what downstream consumers expect (Snowflake extract in Phase 2, dbt staging in Phase 4). No mid-pipeline rework caused by a type mismatch we could have caught up front.
+
+Three additional failsafes Claude should layer in by default:
+
+7. **Idempotency.** Safe to re-run after partial failure — no orphaned state, no accidental duplicates. DDL: drop-and-recreate. DML loaders: TRUNCATE-then-INSERT or upsert on a key.
+8. **Pre-flight + post-action verification.** Validate assumptions before destructive work (file exists, expected row count, schema present). Confirm the outcome after (source-vs-destination row count parity, smoke `SELECT TOP 5` to eyeball content).
+9. **Observable progress + actionable errors.** Long-running operations print progress, not silent spin. Failures surface specifics (which batch number, which file, which row), not just a raw traceback.
+
 ## Pacing
 
 - One concept at a time, or show the big picture first then drill in: Big picture tehn drill in.
