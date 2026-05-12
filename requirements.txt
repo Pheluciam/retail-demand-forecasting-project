@@ -1,0 +1,24 @@
+# =============================================================================
+# Python dependencies — Phase 1
+# =============================================================================
+# Install into the project venv (.venv) with:
+#     pip install -r requirements.txt
+#
+# Pinning strategy: minimum version only at this stage. Once Phase 2/3 are
+# stable we'll generate a frozen lock file with `pip freeze > requirements-lock.txt`.
+# =============================================================================
+
+# Kaggle CLI for M5 dataset download
+kaggle>=1.6.0
+
+# Environment variable loading from .env
+python-dotenv>=1.0.0
+
+# Azure SQL Database connectivity (next session — loading CSVs to Azure SQL)
+pyodbc>=5.0.0
+
+# Tabular data handling
+pandas>=2.0.0
+
+# SQLAlchemy engine wrapper for pandas.to_sql with fast_executemany
+sqlalchemy>=2.0.0

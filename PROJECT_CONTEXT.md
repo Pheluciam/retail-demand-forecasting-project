@@ -2,17 +2,17 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-09.
+> Last updated: 2026-05-12.
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 0 — **COMPLETE** ✅
+**Current phase:** Phase 1 — **IN PROGRESS** 🟡 (first half complete)
 
-**Last action:** All Phase 0 setup tasks complete. Repo initialised, first commit pushed to public GitHub at https://github.com/Pheluciam/retail-demand-forecasting-project. Docker, Git, Python, Kaggle credentials all verified and in place. Ready to begin Phase 1.
+**Last action (2026-05-12):** Azure infrastructure provisioned end-to-end on the Azure Free SQL Database offer. Resource Group, $50 AUD budget alert, Azure SQL Database Serverless (Free tier — 100k vCore-sec + 32 GB storage free for life of subscription, with overage billing disabled), firewall rule for client IP, and connection verified via portal Query Editor (`SELECT @@VERSION` returned `Microsoft SQL Azure 12.0.2000.8`). M5 dataset downloaded from Kaggle to `data/raw/` — all 5 CSVs present (~450 MB uncompressed). Python venv set up with `kaggle`, `pyodbc`, `pandas`, `python-dotenv`, `sqlalchemy` in `requirements.txt`. Secrets in local `.env` (gitignored); template in `.env.example` (committed).
 
-**Next session starts with:** Phase 1 — provision Azure SQL Database, download M5 data, load into the source database.
+**Next session starts with:** Phase 1 second half — bulk-load the 5 M5 CSVs from `data/raw/` into Azure SQL Database. Wide-format sales tables go in as-is (unpivot happens in dbt staging later, per locked decision).
 
 ---
 
@@ -38,6 +38,8 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 
 - **Source database:** Azure SQL Database Serverless General Purpose (NOT Docker locally) — committed in Phase 1
 - **Azure budget alert:** $50/month — to set up in Phase 1
+- **Ingestion pattern:** Simulated freshness via date-partitioned incremental extraction (Option B). All M5 history loaded once into Azure SQL; each scheduled Airflow run extracts one new date slice. Locked 2026-05-12.
+- **Phase ordering:** Airflow stays in Phase 3 (before dbt + Power BI). Decision confirmed 2026-05-12 — matches how production pipelines actually grow.
 - **All other locked decisions:** unchanged from `PROJECT_PLAN.md`
 
 ---
@@ -57,18 +59,32 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 
 ---
 
-## Immediate next steps (Phase 1)
+## Immediate next steps (Phase 1, second half)
 
-1. Sign in to Azure portal, create a Resource Group for this project
-2. Set up budget alert at $50/month
-3. Provision Azure SQL Database (Serverless General Purpose tier with auto-pause)
-4. Configure firewall rule to allow your IP
-5. Download M5 dataset from Kaggle (using kaggle CLI)
-6. Create Python venv and install required packages (`pyodbc`, `pandas`, `kaggle`, etc.)
-7. Load M5 raw CSVs into Azure SQL Database
-8. Verify row counts and sample data
+1. ✅ ~~Sign in to Azure portal, create a Resource Group for this project~~
+2. ✅ ~~Set up budget alert at $50/month~~ (set at $50 AUD)
+3. ✅ ~~Provision Azure SQL Database (Serverless General Purpose tier with auto-pause)~~ — on Free offer
+4. ✅ ~~Configure firewall rule to allow your IP~~ — handled inline during provisioning; current IP `115.69.3.187` whitelisted
+5. ✅ ~~Download M5 dataset from Kaggle (using kaggle CLI)~~
+6. ✅ ~~Create Python venv and install required packages~~ — `.venv` created with `kaggle` installed; full `requirements.txt` to be installed at start of next session via `pip install -r requirements.txt`
+7. ⬜ **Load M5 raw CSVs into Azure SQL Database** ← next session starts here
+8. ⬜ Verify row counts and sample data
 
-Estimated effort for Phase 1: 1–2 sessions.
+### Quick start for next session
+
+```powershell
+cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+Then write a Python script using `pyodbc` + `pandas` to read each CSV from `data/raw/` and bulk-insert into Azure SQL. Wide-format sales tables go in as-is. Connection details are in `.env`.
+
+Estimated effort for Phase 1 second half: 1 session.
+
+### Known issue to fix at session start
+
+VS Code's default Python interpreter path still points to the deleted Project #1 venv (`C:\Users\Phil\Documents\CDC_NT_ETL\.venv`). Fix by `Ctrl+Shift+P` → `Python: Select Interpreter` → pick `.venv` inside this project.
 
 ---
 
