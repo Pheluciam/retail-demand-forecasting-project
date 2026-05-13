@@ -2,32 +2,44 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-12.
+> Last updated: 2026-05-13 (afternoon — end of Phase 2 session 1).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 1 — ✅ **COMPLETE** (2026-05-13)
+**Current phase:** Phase 2 — IN PROGRESS (session 1 of ~3 done)
 
-**Last action (2026-05-13 morning):** Verified the overnight bulk load completed successfully. All 3 raw tables landed with correct row counts:
+**Last action (2026-05-13 afternoon — Phase 2 session 1):** Snowflake account stood up end-to-end. Six of nine Phase 2 sub-tasks complete:
 
-| Table | Row count | Status |
-|---|---|---|
-| `raw.calendar` | 1,969 | ✅ verified |
-| `raw.sell_prices` | 6,841,121 | ✅ verified |
-| `raw.sales_train` | 59,181,090 | ✅ verified |
+1. ✅ Snowflake free trial signed up (Standard edition, AWS, `ap-southeast-2` Sydney; account `ghrcrqs-hw63290`)
+2. ✅ Provisioned `WH_RETAIL` (XS, auto-suspend 60s) + `RETAIL_DB.RAW` + `RETAIL_ENGINEER` role + full grants + role hierarchy (`RETAIL_ENGINEER` → `SYSADMIN`)
+3. ✅ `.env` + `.env.example` updated with Snowflake config (password gitignored)
+4. ✅ `snowflake-connector-python[pandas]` 4.5.0 installed (note: pulled pandas back from 3.0.3 → 2.3.3 — connector hasn't qualified pandas 3.x yet)
+5. ✅ `scripts/smoke_test_snowflake.py` written and passing — all six `CURRENT_*()` values resolve correctly
+6. ✅ `sql/snowflake/01_create_raw_tables.sql` run — three empty RAW tables in `RETAIL_DB.RAW` with `loaded_at` audit cols + Melbourne timezone applied
 
-Schema verification (column counts) and eyeball checks on sample rows all passed via `sql/verify/01_phase1_load_verification.sql` (new file, 5-section verification suite).
+**Phase 2 sub-tasks remaining (next session):**
 
-**Final runtime stats:** total elapsed ~12.2 hours.
-- calendar: ~5 sec
-- sell_prices: 73.1 min (avg 1,560 rows/sec)
-- sales_train: 659.6 min (~11 h, avg 1,495 rows/sec — Free Serverless 2 vCores throughput cap)
+7. ⏳ Write `scripts/extract_azure_to_snowflake.py` — date-parameterised, ~200-300 lines. This is the headline Python work.
+8. ⏳ Test extract on calendar → sell_prices → sales_train (small date window first)
+9. ⏳ 9-point code-quality audit + LEARNINGS update + git commit
 
-**One bookkeeping note from the run:** the script's `EXPECTED_ROWS["sales_train"]` constant had an off-by-1000 arithmetic error (set to 59,180,090; correct value 59,181,090). Verification correctly raised a `MISMATCH`/`ValueError` — but against the wrong baseline. Constant since corrected in source; lesson captured in `LEARNINGS.md` under *Mistakes & diagnoses*.
+**Files added this session:**
 
-**Next session starts with:** Phase 2 — Snowflake signup + Python extract job (Azure SQL → Snowflake RAW).
+- `sql/snowflake/00_provision_account.sql` — warehouse / db / schema / role / grants / timezone setup
+- `sql/snowflake/01_create_raw_tables.sql` — three RAW tables DDL
+- `scripts/smoke_test_snowflake.py` — connector smoke test
+- `LEARNING_ROADMAP.md` — captures post-Project-#3 6-week Python deep-dive plan
+
+**Files updated this session:**
+
+- `.env` + `.env.example` — Snowflake creds added
+- `requirements.txt` — `snowflake-connector-python[pandas]` added
+- `PROJECT_CONTEXT.md` (this file)
+- `LEARNINGS.md` — Snowflake section populated, new design decision logged
+
+**Next session starts with:** writing `scripts/extract_azure_to_snowflake.py` — the date-parameterised extract job. **Locked decision (made this session):** backfill cutoff at **2014-01-01** (backfill 2011-01-29 → 2013-12-31, then incremental walk 2014-01-01 → 2016-06-19). See `LEARNINGS.md` Design Decisions for the full rationale.
 
 ---
 
@@ -92,31 +104,34 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 
 ---
 
-## Phase 2 starting point
+## Phase 2 progress
 
-**Phase 2 = Snowflake + extraction.** Estimated 2–3 sessions.
+**Phase 2 = Snowflake + extraction.** Estimated 2–3 sessions. Session 1 done.
 
-### Pre-Phase-2 reminder (read before starting next session)
+### Session 1 (2026-05-13 afternoon — ✅ DONE)
 
-- **DO NOT sign up for Snowflake yet outside a Phase 2 session.** The free trial is a 30-day clock that starts on signup. Sign up *first thing* when Phase 2 starts, then build immediately so the clock counts toward useful work, not setup downtime.
+1. ✅ Snowflake free trial signed up — Standard edition, AWS, `ap-southeast-2` (Sydney), account `ghrcrqs-hw63290`
+2. ✅ Provisioned in Snowflake: warehouse `WH_RETAIL` (XS, auto-suspend 60s), database `RETAIL_DB`, schema `RAW`, role `RETAIL_ENGINEER`, all grants, role hierarchy
+3. ✅ Snowflake creds in `.env` (password gitignored); `.env.example` updated with non-secret values
+4. ✅ `snowflake-connector-python[pandas]>=3.0.0` added to `requirements.txt` and installed (resolved to v4.5.0)
+5. ✅ `scripts/smoke_test_snowflake.py` — connector smoke test passing
+6. ✅ `sql/snowflake/01_create_raw_tables.sql` — three RAW tables (CALENDAR, SELL_PRICES, SALES_TRAIN) with `loaded_at` audit cols + Melbourne timezone applied
+7. ✅ Locked design decision: backfill cutoff at **2014-01-01** (see `LEARNINGS.md`)
 
-### Phase 2 session 1 plan (next session)
+### Session 2 (next — extract script)
 
-1. Sign up for Snowflake free trial → `signup.snowflake.com`
-   - Pick **AWS** as the cloud, **Standard** edition, region closest to AU East
-2. In Snowflake, provision: warehouse `WH_RETAIL` (XS), database `RETAIL_DB`, schema `RAW`, role `RETAIL_ENGINEER`
-3. Add Snowflake connection details to `.env` (the placeholders already exist in `.env.example`)
-4. Add `snowflake-connector-python` to `requirements.txt` and install
-5. Write `scripts/extract_azure_to_snowflake.py` — date-parameterised from day one (takes `--run-date` arg) per locked decision (simulated freshness)
-6. Test extract on `raw.calendar` first (smallest), then sell_prices, then sales_train
+1. Write `scripts/extract_azure_to_snowflake.py` — date-parameterised from day one (takes `--run-date` arg) per locked decision (simulated freshness). ~200-300 lines.
+2. Test extract on `raw.calendar` first (smallest), then sell_prices, then sales_train, with a tiny date window
+3. 9-point code-quality audit before sign-off
+4. Update LEARNINGS + PROJECT_CONTEXT; git commit + push
 
-### Quick start for the Phase 2 session
+### Quick start for the next Phase 2 session
 
 ```powershell
 cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 .\.venv\Scripts\Activate.ps1
 # Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
-# Then start Phase 2 step 1 — Snowflake signup
+# Then: write scripts/extract_azure_to_snowflake.py (Phase 2 sub-task 7)
 ```
 
 ---
@@ -126,6 +141,7 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 - `PROJECT_PLAN.md` — static plan, scope, timeline, locked decisions, risks
 - `TEACHING_PREFERENCES.md` — how Phil works with Claude (carry-forward from Project #1, plus SQL CAPS preference and Project 2 pacing notes)
 - `LEARNINGS.md` — running journal of lessons learned (populated as we go)
+- `LEARNING_ROADMAP.md` — forward-looking learning pathway beyond Project #2 (incl. planned post-Project-#3 six-week Python deep dive)
 - `README.md` — public-facing project intro for hiring managers (built up over Phase 6)
 - `.gitignore` — files Git should ignore (secrets, data, build artefacts)
 

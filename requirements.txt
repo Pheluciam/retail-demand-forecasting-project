@@ -22,3 +22,13 @@ pandas>=2.0.0
 
 # SQLAlchemy engine wrapper for pandas.to_sql with fast_executemany
 sqlalchemy>=2.0.0
+
+# -----------------------------------------------------------------------------
+# Phase 2 — Snowflake cloud warehouse
+# -----------------------------------------------------------------------------
+
+# Snowflake Python connector — read/write to Snowflake from Python.
+# [pandas] extra enables snowflake.connector.pandas_tools.write_pandas(),
+# which bulk-loads a DataFrame via internal stage + COPY INTO (much faster
+# than row-by-row INSERTs — the recommended bulk-load path).
+snowflake-connector-python[pandas]>=3.0.0
