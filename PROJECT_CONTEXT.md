@@ -2,15 +2,15 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-13 (late afternoon — end of Phase 2 session 2).
+> Last updated: 2026-05-14 (Phase 2 closed; Phase 3 = Airflow opens next session).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 2 — IN PROGRESS (sessions 1 + 2 done, session 3 = backfill)
+**Current phase:** Phase 2 — ✅ DONE. Next session opens **Phase 3 (Airflow)**.
 
-**Last action (2026-05-13 late afternoon — Phase 2 session 2):** `scripts/extract_azure_to_snowflake.py` written, tested end-to-end, and proven idempotent. Eight of nine Phase 2 sub-tasks now complete:
+**Last action (2026-05-14 — Phase 2 session 3):** 3-year backfill executed and verified end-to-end. 35.6M rows landed from Azure SQL into Snowflake in 27.3 minutes via a single PowerShell command. All nine Phase 2 sub-tasks now complete:
 
 1. ✅ Snowflake free trial signed up
 2. ✅ Snowflake account provisioned (warehouse, database, schema, role, grants)
@@ -18,39 +18,34 @@
 4. ✅ `snowflake-connector-python[pandas]` 4.5.0 installed
 5. ✅ `scripts/smoke_test_snowflake.py` written and passing
 6. ✅ `sql/snowflake/01_create_raw_tables.sql` run — three RAW tables ready
-7. ✅ **`scripts/extract_azure_to_snowflake.py` written** (~440 lines including comments)
-8. ✅ **Smoke-tested end-to-end on increasing windows:**
-   - 1 day, calendar only → 1 row, parity OK
-   - Re-run for idempotency proof → pre-DELETE removed 1, re-inserted 1, **still 1 row** ✓
-   - 1 day, all three tables → 30,490 sales_train rows, parity OK
-   - **7 days, all three tables → 213,430 sales_train rows, parity OK in 121 sec**
-   - Transient HTTP retry mid-PUT recovered automatically by Snowflake connector
-9. ⏳ Run actual 3-year backfill + git commit + push (Phase 2 session 3, next session)
+7. ✅ `scripts/extract_azure_to_snowflake.py` written (~440 lines including comments)
+8. ✅ Smoke-tested end-to-end on increasing windows (1 day, idempotent re-run, 1 day all tables, 7 days all tables)
+9. ✅ **3-year backfill executed (2011-01-29 → 2013-12-31) — 27.3 min wall-clock, parity OK on all three tables, end-to-end verification via both script-level and independent SQL queries.**
 
-**Files added this session (Phase 2 session 2):**
+**Files added this session (Phase 2 session 3):**
 
-- `scripts/extract_azure_to_snowflake.py` — date-parameterised Azure SQL → Snowflake extract job. Single CLI tool, two modes: `--run-date YYYY-MM-DD` (incremental) or `--start-date X --end-date Y` (backfill).
+- `sql/verify/02_phase2_extract_verification.sql` — Azure SQL source-side row-count verification queries for the 3-year backfill window. Mirror to the Snowflake-side check.
+- `EXTRACT_PIPELINE.md` (project root) — interview-friendly architecture walkthrough of the Azure SQL → Python → Snowflake pipeline. Mermaid flowchart + stage-by-stage + library breakdown + the two key function calls (`read_sql_query`, `write_pandas`) + "why this design holds up" talking points.
+- `logs/backfill_3yr_*.log` — captured stdout from the backfill run (gitignored).
 
 **Files updated this session:**
 
-- `LEARNINGS.md` — added (a) `Connection Timeout=` ODBC gotcha + fix, (b) `write_pandas` throughput numbers, (c) Snowflake connector transient retry observation, (d) fixed-scan-cost design decision for backfill timing
+- `sql/snowflake/02_extract_smoke_tests.sql` — added Section 5: backfill verification with window-filtered counts vs math-derived expected values.
+- `LEARNINGS.md` — three additions: (a) Snowflake section: "3-year backfill economics" entry with final per-table numbers and throughput; (b) Mistakes & diagnoses: error 40613 cold-start fast-fail; (c) Design decisions: "Validated 2026-05-14" confirmation on the fixed-scan-cost decision.
 - `PROJECT_CONTEXT.md` (this file)
 
-**Key technical findings from this session:**
+**Headline outcomes from this session:**
 
-- **`Connection Timeout=90` in the ODBC connection string was silently ignored.** Fix: pass `connect_args={"timeout": 90}` to SQLAlchemy `create_engine` instead. Phase 1's `load_m5_to_azure_sql.py` has the same latent flaw — flagged as a small side-quest. See LEARNINGS "Mistakes & diagnoses".
-- **`write_pandas` throughput: ~14,000-15,000 rows/sec** sustained on 100k-row chunks for `sales_train`. Much faster than Phase 1's ~1,500 rows/sec write to Azure SQL — different architecture, not different language.
-- **Sales_train table-scan cost is fixed per query**, not per row. 7-day extract was *faster* than 1-day extract. Implication: 3-year backfill will be **~60-90 minutes**, not 40 hours as initially feared. See LEARNINGS "Design decisions".
+- **3-year backfill: 27.3 min wall-clock** for 35.6M rows across 3 tables. Against 60-90 min prediction and 40-hour original fear.
+- **Sustained throughput in production:** sell_prices ~35,500 rows/sec; sales_train ~22,000 rows/sec. Both higher than session 2 spot-test measurements (~3.4× and ~1.5× respectively) — bigger chunks amortise overhead better.
+- **End-to-end parity proven two independent ways:** (1) script's own pre-flight + post-action verification (Azure SQL source count == Snowflake destination written count), and (2) independent SQL queries against both databases run from Snowsight and Azure portal Query editor — all `OK / OK / OK` for calendar (1,068), sell_prices (3,040,105), sales_train (32,563,320).
+- **One real failure mode hit during the run:** error 40613 on the very first connect attempt (overnight auto-pause wake). Manual retry after 45s succeeded. Logged as a "two distinct cold-start failure classes" entry — the session-2 timeout fix doesn't cover 40613. Retry-on-40613 logic is a small follow-up improvement, flagged for before Phase 3 wraps the script in Airflow.
 
-**Next session (Phase 2 session 3) starts with:**
+**Next session (Phase 3 session 1) — Airflow opens:**
 
-- Reset overnight power settings (sleep/screen-off → Never) — same checklist as Phase 1 overnight load.
-- Kick off the 3-year backfill in one invocation:
-  ```powershell
-  python scripts/extract_azure_to_snowflake.py --start-date 2011-01-29 --end-date 2013-12-31
-  ```
-- While it runs (~60-90 min), do the final 9-point audit pass + finalize LEARNINGS + git add + commit + push.
-- Wraps up Phase 2 cleanly; Phase 3 (Airflow) starts the session after.
+- Stand up the Airflow Docker stack (compose file with webserver, scheduler, postgres metadata DB). Local-execute mode is fine for a portfolio project.
+- First DAG: wrap `scripts/extract_azure_to_snowflake.py --run-date {{ ds }}` as a single PythonOperator task. Backfill catchup disabled initially; first scheduled run starts at 2014-01-01.
+- Optional pre-work for Phase 3 session 1: add retry-on-40613 logic to the extract script so the first scheduled Airflow run doesn't trip on a cold Azure SQL.
 
 ---
 
@@ -136,25 +131,30 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 3. ✅ Mid-test 9-point audit completed; three real findings logged (`Connection Timeout=` gotcha, scan-cost economics, transient retry behavior) — all addressed or documented in LEARNINGS
 4. ✅ LEARNINGS + PROJECT_CONTEXT updated
 
-### Session 3 (next — backfill + Phase 2 closeout)
+### Session 3 (2026-05-14 morning — ✅ DONE)
 
-1. Reset overnight-stability power settings (Never sleep, Never screen-off, lid close → Do nothing) per Phase 1 carry-forward.
-2. Run the actual 3-year backfill in one invocation (~60-90 min):
+1. ✅ Windows sleep settings → Never for the duration; reverted post-backfill.
+2. ✅ 3-year backfill executed in one invocation:
    ```powershell
    python scripts/extract_azure_to_snowflake.py --start-date 2011-01-29 --end-date 2013-12-31
    ```
-3. Post-backfill verification: source-vs-destination row counts for all three tables.
-4. Git add + commit + push (extract script + LEARNINGS + PROJECT_CONTEXT updates from session 2).
-5. Phase 2 done. Phase 3 (Airflow) opens the session after.
+   **Wall-clock: 27.3 min** (vs 60-90 min predicted, vs 40-hour original fear).
+3. ✅ End-to-end parity verified two ways:
+   - Script-internal: source count == written count for all three tables.
+   - Independent SQL: `sql/snowflake/02_extract_smoke_tests.sql` Section 5 + `sql/verify/02_phase2_extract_verification.sql` — all three tables `OK`.
+4. ✅ Documentation updates: `LEARNINGS.md` (3 entries added), `EXTRACT_PIPELINE.md` (new interview walkthrough), `sql/snowflake/02_extract_smoke_tests.sql` (Section 5), `sql/verify/02_phase2_extract_verification.sql` (new file), `PROJECT_CONTEXT.md` (this file).
+5. ✅ Git add + commit + push (Phase 2 closeout commit).
 
-### Quick start for Phase 2 session 3
+**Phase 2 closed.** Phase 3 (Airflow) opens the next session.
+
+### Quick start for Phase 3 session 1 (Airflow)
 
 ```powershell
 cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 .\.venv\Scripts\Activate.ps1
 # Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
-# Reset Windows power settings → Never
-# Then: backfill 2011-01-29 → 2013-12-31 (one PowerShell invocation, ~60-90 min)
+# Verify Docker Desktop is running: docker --version
+# Then start building docker-compose.yml for the Airflow stack.
 ```
 
 ---
