@@ -2,50 +2,49 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-14 (Phase 2 closed; Phase 3 = Airflow opens next session).
+> Last updated: 2026-05-14 (Phase 3 session 1 closed — Airflow stack live, first DAG running end-to-end).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 2 — ✅ DONE. Next session opens **Phase 3 (Airflow)**.
+**Current phase:** Phase 3 — session 1 ✅ DONE. Next session opens **Phase 3 session 2 (Airflow polish + scheduled-run observation)**.
 
-**Last action (2026-05-14 — Phase 2 session 3):** 3-year backfill executed and verified end-to-end. 35.6M rows landed from Azure SQL into Snowflake in 27.3 minutes via a single PowerShell command. All nine Phase 2 sub-tasks now complete:
+**Last action (2026-05-14 — Phase 3 session 1):** Full Airflow stack stood up via Docker Compose, first DAG written and parsing cleanly, manual trigger of two consecutive incremental days (2014-01-01, 2014-01-02) succeeded end-to-end. 56,860 rows moved through the pipeline orchestrated by Airflow (no human in the loop after the trigger). Independent Snowflake-side verification returned six PASS rows.
 
-1. ✅ Snowflake free trial signed up
-2. ✅ Snowflake account provisioned (warehouse, database, schema, role, grants)
-3. ✅ Snowflake creds in `.env`
-4. ✅ `snowflake-connector-python[pandas]` 4.5.0 installed
-5. ✅ `scripts/smoke_test_snowflake.py` written and passing
-6. ✅ `sql/snowflake/01_create_raw_tables.sql` run — three RAW tables ready
-7. ✅ `scripts/extract_azure_to_snowflake.py` written (~440 lines including comments)
-8. ✅ Smoke-tested end-to-end on increasing windows (1 day, idempotent re-run, 1 day all tables, 7 days all tables)
-9. ✅ **3-year backfill executed (2011-01-29 → 2013-12-31) — 27.3 min wall-clock, parity OK on all three tables, end-to-end verification via both script-level and independent SQL queries.**
+**Files added this session (Phase 3 session 1):**
 
-**Files added this session (Phase 2 session 3):**
-
-- `sql/verify/02_phase2_extract_verification.sql` — Azure SQL source-side row-count verification queries for the 3-year backfill window. Mirror to the Snowflake-side check.
-- `EXTRACT_PIPELINE.md` (project root) — interview-friendly architecture walkthrough of the Azure SQL → Python → Snowflake pipeline. Mermaid flowchart + stage-by-stage + library breakdown + the two key function calls (`read_sql_query`, `write_pandas`) + "why this design holds up" talking points.
-- `logs/backfill_3yr_*.log` — captured stdout from the backfill run (gitignored).
+- `airflow/Dockerfile` — custom image extending `apache/airflow:2.10.3-python3.11`, layering on Microsoft ODBC Driver 17 + a minimal `requirements-airflow.txt`. Versions single-sourced via ARG above FROM.
+- `airflow/docker-compose.yml` — postgres metadata DB + idempotent init + webserver + scheduler. LocalExecutor. `env_file: ../.env` for Azure SQL + Snowflake creds. `../scripts:/opt/airflow/scripts:ro` mount so the DAG can call the existing extract module.
+- `airflow/requirements-airflow.txt` — minimal extras (pyodbc, python-dotenv, snowflake-connector-python[pandas]) with no version pins; let Airflow's constraints file decide versions.
+- `airflow/dags/m5_daily_extract.py` — first DAG. `@daily`, `start_date=2014-01-01 Australia/Melbourne`, `catchup=False`, `max_active_runs=1`, `retries=2`. Single `@task` wraps `extract_azure_to_snowflake.main()` via `sys.argv` shim. Tags: `m5`, `extract`, `phase3`.
+- `airflow/README.md` — boot/shutdown/diagnostics cheatsheet for the stack. Quick-start commands, common gotchas, layout reference.
+- `pyrightconfig.json` (project root) — `extraPaths: ["scripts"]` so Pylance resolves the DAG-side `import extract_azure_to_snowflake` against the actual module on the host. Tool-agnostic editor config.
+- `sql/verify/03_phase3_dag_extract_verification.sql` — independent Snowflake-side verification of the first two Airflow-orchestrated extracts. Four detailed sections + a Section 5 PASS/FAIL rollup using the CTE pattern.
 
 **Files updated this session:**
 
-- `sql/snowflake/02_extract_smoke_tests.sql` — added Section 5: backfill verification with window-filtered counts vs math-derived expected values.
-- `LEARNINGS.md` — three additions: (a) Snowflake section: "3-year backfill economics" entry with final per-table numbers and throughput; (b) Mistakes & diagnoses: error 40613 cold-start fast-fail; (c) Design decisions: "Validated 2026-05-14" confirmation on the fixed-scan-cost decision.
-- `PROJECT_CONTEXT.md` (this file)
+- `scripts/extract_azure_to_snowflake.py` — added `wake_azure_sql()` helper for retry-on-40613/40197, wired into `main()` between `connect_azure_sql()` and `connect_snowflake()`. Also added CLI-contract note in the module docstring warning that the DAG depends on `--run-date`.
+- `CODE_QUALITY.md` — added new criterion 6 "Dev environment hygiene"; renumbered existing 6→7, 7→8, 8→9, 9→10; "six core checks" → "seven core checks". Triggered by yellow-squigglies-on-DAG-file mid-session.
+- `TEACHING_PREFERENCES.md` — mirrored the criterion 6 addition. Plus added an explicit rule about showing code changes inline (with line numbers, file paths, before/after) for code-shaped files but not for doc-shaped files. Refined twice through the session as Phil clarified preferences.
+- `LEARNINGS.md` — eight new entries across the Airflow section: stack architecture, custom-image SQLAlchemy/constraints story, Docker-daemon-must-run, code-quality framework gap, Airflow 2.x CLI flag versioning (`-e` not `--logical-date`), `catchup=False` semantics on unpause, CTE-based PASS/FAIL pattern.
+- Local `.venv` — `pip install pendulum "apache-airflow==2.10.3" --no-deps` to give Pylance enough to resolve airflow imports without dragging in Windows-incompatible transitive deps.
 
 **Headline outcomes from this session:**
 
-- **3-year backfill: 27.3 min wall-clock** for 35.6M rows across 3 tables. Against 60-90 min prediction and 40-hour original fear.
-- **Sustained throughput in production:** sell_prices ~35,500 rows/sec; sales_train ~22,000 rows/sec. Both higher than session 2 spot-test measurements (~3.4× and ~1.5× respectively) — bigger chunks amortise overhead better.
-- **End-to-end parity proven two independent ways:** (1) script's own pre-flight + post-action verification (Azure SQL source count == Snowflake destination written count), and (2) independent SQL queries against both databases run from Snowsight and Azure portal Query editor — all `OK / OK / OK` for calendar (1,068), sell_prices (3,040,105), sales_train (32,563,320).
-- **One real failure mode hit during the run:** error 40613 on the very first connect attempt (overnight auto-pause wake). Manual retry after 45s succeeded. Logged as a "two distinct cold-start failure classes" entry — the session-2 timeout fix doesn't cover 40613. Retry-on-40613 logic is a small follow-up improvement, flagged for before Phase 3 wraps the script in Airflow.
+- **First DAG end-to-end working.** `m5_daily_extract` triggered twice via Airflow CLI (`docker compose exec airflow-scheduler airflow dags trigger m5_daily_extract -e <date>`), both runs landed real rows in Snowflake. 2014-01-01: 1 + 25,939 + 30,490 = 56,430 rows. 2014-01-02: same shape (sell_prices shares the fiscal week, so the same 25,939 rows back the second date too).
+- **Verification clean.** Independent Snowflake-side SQL (`sql/verify/03_phase3_dag_extract_verification.sql`) returned 6 PASS, 0 FAIL. Both script-internal parity and downstream double-check aligned.
+- **The wake helper earned its keep on its first real run.** When the manual smoke test ran in PowerShell after lunch, Azure SQL had auto-paused; `wake_azure_sql` caught 40613, slept 45s, retried, succeeded. Exactly the failure mode predicted in `LEARNINGS` during Phase 2 session 3 — now covered.
+- **Code-quality framework grew during the session.** Yellow Pylance squigglies on the freshly-written DAG file revealed the original 9 criteria didn't cover dev-environment hygiene. Added criterion 6 and renumbered the rest. The framework now catches this class of issue going forward.
+- **Mid-session pacing refinement.** Phil pushed back on "lots of changes summarised in bullets, hard to follow." `TEACHING_PREFERENCES.md` updated twice to capture an explicit rule for inline code display (path + line numbers + before/after for code-shaped files; description-only for doc-shaped).
 
-**Next session (Phase 3 session 1) — Airflow opens:**
+**Next session (Phase 3 session 2) — Airflow polish + scheduled-run observation:**
 
-- Stand up the Airflow Docker stack (compose file with webserver, scheduler, postgres metadata DB). Local-execute mode is fine for a portfolio project.
-- First DAG: wrap `scripts/extract_azure_to_snowflake.py --run-date {{ ds }}` as a single PythonOperator task. Backfill catchup disabled initially; first scheduled run starts at 2014-01-01.
-- Optional pre-work for Phase 3 session 1: add retry-on-40613 logic to the extract script so the first scheduled Airflow run doesn't trip on a cold Azure SQL.
+- Toggle DAG back off between sessions OR let the daily schedule walk forward and observe live. If left running, by next session there should be 1-3 additional auto-fired runs in the metadata DB (2026-05-15, 16, 17), which is itself useful as a demo of "Airflow runs by itself."
+- Add a downstream Snowflake-side verification task to the DAG. Two-task DAG: `extract_one_day` → `verify_one_day`. The verify task queries Snowflake and confirms the row count matches what the script reported. Closes the loop inside Airflow rather than relying on a manual SQL run.
+- Consider `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true` in docker-compose so future manual triggers can use the UI form (with calendar date picker) rather than the CLI. Requires `down`+`up` cycle to take effect.
+- Document the run in the README's architecture diagram so the new Airflow section in the public README has a concrete example of an Airflow-orchestrated extract.
+- Stretch: VS Code Dev Containers as a Phase 6 polish item — attaches the editor *into* the running Airflow container, eliminating any Windows-host vs Linux-runtime drift. Real-DE-shop pattern, strong interview talking point.
 
 ---
 
@@ -155,6 +154,51 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 # Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
 # Verify Docker Desktop is running: docker --version
 # Then start building docker-compose.yml for the Airflow stack.
+```
+
+---
+
+## Phase 3 progress
+
+**Phase 3 = Orchestration with Airflow.** Estimated 2–3 sessions. Session 1 done.
+
+### Session 1 (2026-05-14 afternoon — ✅ DONE)
+
+1. ✅ Pre-work: added `wake_azure_sql()` retry helper to `scripts/extract_azure_to_snowflake.py`, covering Azure SQL cold-start error codes 40613 and 40197. 3 attempts × 45s delay. Smoke-tested against a paused DB — caught 40613 on attempt 1, retried, succeeded.
+2. ✅ Built Airflow Docker stack: `airflow/Dockerfile` (custom image with msodbcsql17 + minimal requirements pinned to Airflow constraints) + `airflow/docker-compose.yml` (postgres + idempotent init + webserver + scheduler, LocalExecutor, env_file from `../.env`).
+3. ✅ Booted the stack — three containers healthy, UI reachable at `localhost:8080` with `airflow`/`airflow` admin login.
+4. ✅ Wrote first DAG `m5_daily_extract` using the TaskFlow API (@dag + @task decorators). Calls existing extract script via `sys.argv` shim so the script needs zero changes. Catchup off, max_active_runs=1, retries=2.
+5. ✅ Triggered manually for `2014-01-01` and `2014-01-02` via Airflow CLI inside the scheduler container. Both runs landed real rows end-to-end through the orchestrated pipeline.
+6. ✅ Verified independently from Snowsight via `sql/verify/03_phase3_dag_extract_verification.sql` — 6 PASS / 0 FAIL using the new CTE-based summary template.
+
+### Mid-session: code-quality framework evolved
+
+- ✅ Yellow Pylance squigglies on the DAG file revealed a gap: original 9 criteria all audited code content, never the dev environment around it. Added criterion 6 "Dev environment hygiene" to `CODE_QUALITY.md` and `TEACHING_PREFERENCES.md`; renumbered the rest (six core checks → seven).
+- ✅ Practical fixes for the same gap: `pyrightconfig.json` + `pip install pendulum apache-airflow==2.10.3 --no-deps` to give Pylance enough to resolve DAG imports on Windows without dragging in Airflow's Unix-only transitive deps. Flagged VS Code Dev Containers as a Phase 6 polish improvement.
+
+### Mid-session commit
+
+- ✅ Git commit `d1eee77` — "feat(airflow): Phase 3 session 1 - stack scaffolding + first DAG (pre-trigger)". Pushed to `origin/main`. Captures the stack + DAG before the first trigger fired.
+
+### Session 1 closeout (this commit)
+
+- ✅ Three new LEARNINGS entries: Airflow 2.x CLI flag versioning (`-e` vs `--logical-date`), `catchup=False` unpause semantics, CTE PASS/FAIL pattern.
+- ✅ This `PROJECT_CONTEXT.md` updated to reflect Phase 3 session 1 closing.
+- ✅ Git commit + push (this commit).
+
+**Phase 3 session 1 closed.** Session 2 opens with Airflow polish: downstream verify task, scheduled-run observation, UI trigger-with-config enabled.
+
+### Quick start for Phase 3 session 2
+
+```powershell
+cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
+.\.venv\Scripts\Activate.ps1
+cd airflow
+docker compose up -d                                    # boot stack if not running
+docker compose ps                                       # verify all three healthy
+# Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
+# Open Airflow UI: http://localhost:8080  (airflow / airflow)
+# Check for any auto-fired runs since last session via Grid view.
 ```
 
 ---

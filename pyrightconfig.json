@@ -1,0 +1,13 @@
+{
+  "//": "Pyright / Pylance config. Tells the language server about extra import-resolution paths so it can validate imports that work via runtime sys.path manipulation. Tool-agnostic: any editor's Pyright-based linter respects this file (VS Code, PyCharm, vim, etc.).",
+
+  "extraPaths": [
+    "scripts"
+  ],
+
+  "//comment_pythonVersion": "Match the runtime Python version used in the Airflow container so type checks reflect what actually runs.",
+  "pythonVersion": "3.11",
+
+  "//comment_reportMissingImports": "We expect some imports (apache-airflow's transitive deps) to be unresolvable locally because we only install --no-deps for IDE support. 'warning' instead of 'error' keeps the issue visible without blocking work.",
+  "reportMissingImports": "warning"
+}

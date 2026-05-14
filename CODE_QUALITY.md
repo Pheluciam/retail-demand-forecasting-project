@@ -10,7 +10,7 @@
 
 ---
 
-## The six core checks
+## The seven core checks
 
 Applied before any script — SQL or Python — is considered "done":
 
@@ -68,7 +68,21 @@ Code matches the project's own conventions and the platform conventions of its e
 - `raw` schema in Azure SQL mirrors the planned `RAW` schema in Snowflake — same mental model both sides of the extract.
 - File layout: `sql/ddl/` for DDL, `scripts/` for Python — predictable for any reviewer.
 
-### 6. Upstream / downstream contract
+### 6. Dev environment hygiene
+
+The local development environment fully validates the code before commit. Linter and type-checker output is treated as signal, not noise — if it's yellow, it gets addressed (fixed, or explicitly suppressed with a documented reason). Drift between "what the linter sees" and "what gets committed" is the same silent-bug class the rest of this checklist exists to prevent.
+
+**Examples in this repo**
+
+- `pyrightconfig.json` at the project root with `extraPaths: ["scripts"]` so Pylance can resolve the DAG-side `import extract_azure_to_snowflake` against the actual module on the host.
+- `apache-airflow==2.10.3` installed locally with `--no-deps` so the IDE finds `from airflow.decorators import dag, task` without dragging in Windows-incompatible Unix daemons.
+- `# type: ignore` used only as a last resort, with a comment explaining *why* it's there — never to paper over fixable issues.
+
+**How this got here**
+
+Added 2026-05-14, mid-Phase-3-session-1. Yellow squigglies on `airflow/dags/m5_daily_extract.py` surfaced that the original nine criteria all audited the code itself; none covered the environment around it. The checklist evolves when we find gaps — full diagnosis in `LEARNINGS.md`.
+
+### 7. Upstream / downstream contract
 
 Inputs match what the upstream source actually produces (verified, not assumed). Outputs match what downstream consumers expect. No mid-pipeline rework caused by a type mismatch that could have been caught up front.
 
@@ -85,7 +99,7 @@ Inputs match what the upstream source actually produces (verified, not assumed).
 
 Layered in by default on every non-trivial script:
 
-### 7. Idempotency
+### 8. Idempotency
 
 Every script can be re-run after a partial failure without orphaned state or accidental duplicates.
 
@@ -94,7 +108,7 @@ Every script can be re-run after a partial failure without orphaned state or acc
 - DDL uses drop-and-recreate — `sql/ddl/01_create_raw_tables.sql` is safe to re-run during schema iteration.
 - (Phase 1 loader, in progress) Will TRUNCATE-then-INSERT for each table — a failed mid-run leaves zero ghost rows.
 
-### 8. Pre-flight and post-action verification
+### 9. Pre-flight and post-action verification
 
 Validate assumptions before destructive work. Confirm the outcome after.
 
@@ -111,7 +125,7 @@ The loader's `EXPECTED_ROWS` constant for `sales_train` was a hardcoded magic nu
 
 **Lesson:** verifying the SHAPE of a calculation is not verifying the PRODUCT. When a magic number guards verification, compute it via two independent routes (Python arithmetic AND `SELECT 30490 * 1941` in SQL), or — better — derive the expected value from runtime measurements instead of hardcoding. The full diagnosis is in `LEARNINGS.md` under *Mistakes & diagnoses*.
 
-### 9. Observable progress and actionable errors
+### 10. Observable progress and actionable errors
 
 Long-running operations report what they are doing. Failures surface specifics, not raw tracebacks.
 
@@ -135,4 +149,4 @@ The structure of this project is deliberately documentation-heavy in support of 
 
 ---
 
-*Last updated: 2026-05-12. First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*
+*Last updated: 2026-05-14 (Phase 3 session 1 — added criterion 6, Dev environment hygiene). First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*

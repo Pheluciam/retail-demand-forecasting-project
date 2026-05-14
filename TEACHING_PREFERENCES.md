@@ -45,25 +45,31 @@ This is the big one — set the default and Claude will respect it.
 - For pure boilerplate (project scaffolding, config files): <Claude can just write it / still ask> Claude can write, but explain
 - When I say "just show me the answer", do that without the teaching detour: <yes> Yes.
 - **SQL code style: ALL keywords in CAPITALS** (`SELECT`, `FROM`, `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, etc.). Applies to all SQL dialects — Postgres, MS SQL Server / T-SQL, Snowflake, dbt models. Same rule for DDL keywords (`CREATE TABLE`, `ALTER`, `DROP`).
+- **Show actual code changes inline, don't just describe them — but only for code-shaped files.** Phil learns by reading real code in context, not summaries of it. *Code-shaped* = Python, SQL, YAML, JSON, Dockerfile, shell scripts, PowerShell, anything where the syntax itself carries learning. *Doc-shaped* = Markdown, README updates, project-tracking notes — these are knowledge capture, not coding, and inline diffs add noise without learning value. Guidelines:
+  - **Code-shaped, existing-file edits:** show a small before/after with a few lines of surrounding context, and **include line numbers** in the snippet so Phil can navigate straight to the change in VS Code.
+  - **Code-shaped, new files:** paste the **complete file**, lead with the full path (e.g. `airflow/pyrightconfig.json` or `scripts/foo.py`), and add a one-line explanation of *why* the file was created and *why selected* — what role it plays.
+  - **Doc-shaped edits or new files** (`*.md` mainly): a brief description in chat of what was added and where is enough. Don't paste markdown diffs unless Phil specifically asks.
+  - **Trivial code edits** (single-line typo fix, removing one unused import, renaming a single variable): brief description, no code block needed.
 
 ## Code quality checklist
 
 Added 2026-05-12. Before any non-trivial script is considered "done", Claude should explicitly audit it against the criteria below and surface findings (good or bad). Be honest where the script is already at the right state — **don't gold-plate just because the audit is being requested.**
 
-The six criteria I want checked every time:
+The seven criteria I want checked every time:
 
 1. **Currency.** Uses current language/dialect idioms; no deprecated patterns (e.g. `pathlib` over `os.path`; f-strings over `%s`; `DROP TABLE IF EXISTS` over pre-2016 `OBJECT_ID` checks where Azure SQL supports the modern form).
 2. **Compactness.** Concise but not clever golf — readability never sacrificed for brevity.
 3. **Resource efficiency (cost-aware).** Minimises CPU, memory, network, and storage. Free-tier-aware: compress large tables, use tight types (`TINYINT`/`SMALLINT` where they fit), avoid unnecessary indexes during bulk load.
 4. **Privacy & security.** Secrets externalised to `.env` (gitignored). TLS in transit (`Encrypt=yes`). Server cert validation on (`TrustServerCertificate=no`). Connection timeouts bounded. No passwords or PII in stdout/logs. No string-concatenated SQL where injection could occur.
 5. **Workflow consistency.** Matches the project's conventions: `snake_case`, `NVARCHAR` for strings, `raw` schema in source DB / `RAW` in Snowflake, naming patterns from `PROJECT_PLAN.md`.
-6. **Upstream/downstream contract.** Inputs match what the upstream source actually produces (column names, types, encoding, NULL conventions). Outputs match what downstream consumers expect (Snowflake extract in Phase 2, dbt staging in Phase 4). No mid-pipeline rework caused by a type mismatch we could have caught up front.
+6. **Dev environment hygiene.** Local dev environment fully validates the code before commit — linter warnings are zero-tolerance, IDE imports resolve to the same modules the runtime uses, local venv mirrors deployed env (or the gap is documented). Added 2026-05-14 (Phase 3 session 1).
+7. **Upstream/downstream contract.** Inputs match what the upstream source actually produces (column names, types, encoding, NULL conventions). Outputs match what downstream consumers expect (Snowflake extract in Phase 2, dbt staging in Phase 4). No mid-pipeline rework caused by a type mismatch we could have caught up front.
 
 Three additional failsafes Claude should layer in by default:
 
-7. **Idempotency.** Safe to re-run after partial failure — no orphaned state, no accidental duplicates. DDL: drop-and-recreate. DML loaders: TRUNCATE-then-INSERT or upsert on a key.
-8. **Pre-flight + post-action verification.** Validate assumptions before destructive work (file exists, expected row count, schema present). Confirm the outcome after (source-vs-destination row count parity, smoke `SELECT TOP 5` to eyeball content).
-9. **Observable progress + actionable errors.** Long-running operations print progress, not silent spin. Failures surface specifics (which batch number, which file, which row), not just a raw traceback.
+8. **Idempotency.** Safe to re-run after partial failure — no orphaned state, no accidental duplicates. DDL: drop-and-recreate. DML loaders: TRUNCATE-then-INSERT or upsert on a key.
+9. **Pre-flight + post-action verification.** Validate assumptions before destructive work (file exists, expected row count, schema present). Confirm the outcome after (source-vs-destination row count parity, smoke `SELECT TOP 5` to eyeball content).
+10. **Observable progress + actionable errors.** Long-running operations print progress, not silent spin. Failures surface specifics (which batch number, which file, which row), not just a raw traceback.
 
 ## Pacing
 

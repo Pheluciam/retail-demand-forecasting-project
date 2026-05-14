@@ -42,6 +42,13 @@ x-airflow-common:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # Empty Fernet key is intentional for local dev: we don't yet store any
+    # encrypted values in the Airflow metadata DB (Connections, Variables).
+    # If/when we store credentials inside Airflow itself (rather than in
+    # ../.env), generate a real key with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # ...stash it in .env as AIRFLOW_FERNET_KEY, and reference it here as
+    # AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY}".
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'

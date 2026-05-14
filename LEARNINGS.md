@@ -224,6 +224,97 @@ Two-stage failure during the first build of the custom Airflow image. Worth capt
 
 Trivial-in-hindsight but worth noting because the error message is opaque: `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`. That long path is Docker Desktop's named pipe on Windows. The error is just "Docker Desktop isn't running." Fix: open Docker Desktop from the Start menu, wait for the whale icon in the taskbar to stop animating (settles to solid), then retry. The CLI (`docker`, `docker compose`) is a thin client that talks to a background service — the service has to be alive for any command to work.
 
+**Code-quality framework gap discovered: dev environment hygiene (2026-05-14, Phase 3 session 1)**
+
+Mid-session, yellow Pylance squigglies appeared on the freshly-written DAG file (`airflow/dags/m5_daily_extract.py`) — `import pendulum`, `from airflow.decorators import dag, task`, `import extract_azure_to_snowflake`. Phil pushed back: shouldn't `CODE_QUALITY.md` have flagged this kind of issue *before* it became a problem?
+
+**Diagnosis.** The lunch audit had been run thoroughly against all nine criteria. But every one of those criteria audits what's *inside* the code — idioms, security, types, idempotency, observability. None audited the *dev environment around* the code — whether the local IDE could fully validate the file before commit. A clean genuine gap in the framework, not a memory miss or audit-execution miss.
+
+**Fix.** Three coordinated edits, treating this as a process-improvement moment:
+
+- **Added criterion 6 to `CODE_QUALITY.md`: "Dev environment hygiene."** Linter warnings zero-tolerance, IDE imports resolve to the same modules the runtime uses, local venv mirrors deployed environment, gaps documented when full local install isn't viable (Windows-incompatible deps, etc.).
+- **Renumbered the rest of the checklist** (existing 6→7, 7→8, 8→9, 9→10) and updated section heading from "six core checks" to "seven core checks."
+- **Mirrored the same change in `TEACHING_PREFERENCES.md`** which carries the abbreviated checklist alongside it — the two stay in sync.
+
+**Practical-fix corollary.** While the framework was being updated, the actual yellow squigglies were addressed with the canonical Windows-host workaround:
+
+- `pip install pendulum "apache-airflow==2.10.3" --no-deps` — installs the Airflow package source files into the local venv so Pylance can resolve `airflow.decorators` imports, without dragging in the 100+ Unix-only transitive dependencies that don't work on Windows native.
+- `pyrightconfig.json` at project root with `extraPaths: ["scripts"]` — tells Pylance the DAG's runtime `sys.path.insert(0, "/opt/airflow/scripts")` corresponds to the host's `scripts/` folder, so `import extract_azure_to_snowflake` resolves cleanly.
+- *Truly* professional answer for Windows-host DE work is **VS Code Dev Containers** (editor attaches to the running container; zero drift). Flagged as a Phase 6 polish item — strong interview talking point about progression from pragmatic-now to modern-later.
+
+**What this taught me.**
+
+- A code-quality checklist is a living artefact. Its value is in catching mistakes; the moment a mistake bypasses it, the checklist itself is the artefact to improve. Updating the checklist alongside the fix is the move that pays compounding interest across all future projects.
+- "Code quality" and "dev environment quality" are distinct concerns and both deserve explicit criteria. Conflating them means dev-env issues hide as random IDE complaints rather than being treated as the same class of "drift creates silent bugs" risk that the rest of the checklist guards against.
+- Carry-forward to Project #3: criterion 6 (Dev environment hygiene) starts from day one — pyrightconfig, IDE-resolves-runtime imports, linter-warnings-zero-tolerance baked into Phase 0 scaffolding.
+
+**Airflow 2.x CLI flag is `-e` / `--exec-date`, not `--logical-date` (2026-05-14, Phase 3 session 1)**
+
+First attempted to manually trigger the DAG for a specific past date with `airflow dags trigger m5_daily_extract --logical-date 2014-01-02T00:00:00`. Failed with `airflow command error: unrecognized arguments: --logical-date 2014-01-02T00:00:00`.
+
+**Diagnosis.** `--logical-date` only landed in Airflow 3.x. Airflow 2.10 still uses `-e` (short form) or `--exec-date` (long form). The terminology shift `execution_date` → `logical_date` happened in stages:
+
+- Airflow 2.2 (2021): renamed the Python API parameter (the macro available to DAG code).
+- Airflow 3.0: finally followed through and renamed the CLI flag to match.
+- Airflow 2.x in between: Python code references `logical_date`, CLI still uses `--exec-date` for backward compatibility. This terminology mismatch is invisible in tutorials that show only Python, but bites the moment you go to the CLI.
+
+**Fix.** Use `-e`:
+
+```powershell
+docker compose exec airflow-scheduler airflow dags trigger m5_daily_extract -e 2014-01-02T00:00:00
+```
+
+**Carry-forward.** Run `airflow version` (or `docker compose exec airflow-scheduler airflow version`) before constructing CLI invocations against a new Airflow stack. Tutorial syntax written for Airflow 3.x will silently fail on 2.x for at least this one flag. Same family of risk as "ODBC Driver 17 vs 18" — version-specific names that look interchangeable but aren't.
+
+**`catchup=False` semantics: still runs the most recent interval on unpause (2026-05-14, Phase 3 session 1)**
+
+When the DAG was unpaused via the UI toggle, an unexpected scheduled run fired immediately for `scheduled__2026-05-12T14:00:00+00:00` — even though the DAG has `catchup=False`. Caught me out: I assumed `catchup=False` meant "no scheduled runs fire until the next scheduled interval boundary."
+
+**Actual semantics.** `catchup=False` means: when the DAG is unpaused, Airflow runs *exactly one* scheduled instance — the most recent interval that has already ended — and skips all earlier missed intervals. The protection against "auto-backfill 4,500 days from 2014 forward" works as expected; what doesn't get protected is that *one* most-recent-interval run firing on unpause.
+
+**Why it works this way.** Airflow's UX assumes that when you unpause a DAG, you want at least one run to fire so you can validate it works. Silent-until-next-tick would make it harder to know "did unpausing actually do anything?"
+
+**For our setup this was a no-op:** the auto-fired run targeted "today's date" (~2026-05-14) which is outside the M5 dataset's calendar range. The script found 0 calendar rows for the window, logged the warning, and exited 0. Clean.
+
+**Carry-forward to Project #3 and beyond.** If a DAG should *truly* not fire on unpause (e.g., it writes to a production table and you don't want an accidental run), don't rely on `catchup=False` to protect you. Either keep the DAG paused until you trigger explicitly, or guard the first task with a sensor that no-ops when the data interval is outside the safe window. Distinguishing "I want catchup off because I'd otherwise drown in backlog" from "I want zero auto-runs on unpause" matters.
+
+**CTE-based PASS/FAIL verification template (2026-05-14, Phase 3 session 1)**
+
+Captured for reuse across future projects. Lives concretely in `sql/verify/03_phase3_dag_extract_verification.sql` Section 5. The shape:
+
+```sql
+WITH expected AS (
+    SELECT 'check_1' AS check_name, <expected_count_1> AS expected_rows UNION ALL
+    SELECT 'check_2' AS check_name, <expected_count_2> AS expected_rows UNION ALL
+    -- one row per check
+),
+actual AS (
+    SELECT 'check_1' AS check_name,
+        (SELECT COUNT(*) FROM <table_1> WHERE <filter>) AS actual_rows
+    UNION ALL
+    SELECT 'check_2',
+        (SELECT COUNT(*) FROM <table_2> WHERE <filter>)
+    -- matching one per check
+)
+SELECT
+    e.check_name,
+    e.expected_rows,
+    a.actual_rows,
+    CASE WHEN e.expected_rows = a.actual_rows THEN 'PASS' ELSE 'FAIL' END AS status
+FROM expected e
+JOIN actual a ON e.check_name = a.check_name
+ORDER BY e.check_name;
+```
+
+**Why this pattern earns its keep:**
+
+- **Single result set.** N checks roll up into one tidy table with a status column. At-a-glance "all PASS or any FAIL" with no scrolling through separate query results.
+- **Hardcoded expected values force pre-commitment** to what "correct" means *before* running. Catches assumption drift — if you only ever look at the actual count, you have no anchor to disagree with.
+- **Trivial to extend.** Add a check = add one row to `expected` and one to `actual`. Six lines of SQL for a new test.
+- **Snowflake-agnostic.** Pure ANSI SQL; works the same on Postgres, BigQuery, Databricks SQL Warehouse. No dialect-specific bits.
+
+**Carry-forward.** Any verification SQL file with two or more checks in future projects ends with a Section N rollup using this template. Cheap insurance; cost is ~30 lines of well-structured SQL per file. Detailed sections (1, 2, 3, ...) stay for debugging when a FAIL appears; the rollup is the headline.
+
 ### dbt (advanced from Project #1)
 
 _(to be populated during Phase 4 — incremental models, partitioning, dbt_utils,

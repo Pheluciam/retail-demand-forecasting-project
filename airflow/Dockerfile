@@ -14,7 +14,18 @@
 #   * Tagged version, not `latest`, so the build is deterministic.
 # =============================================================================
 
-FROM apache/airflow:2.10.3-python3.11
+# Single source of truth for the Airflow + Python versions. The same ARGs
+# drive both the base image tag (FROM line below) and the constraints URL
+# (further down). Bump in one place; no drift between layers.
+#
+# Docker quirk: ARGs declared BEFORE the FROM line are "global" and are
+# consumed by FROM, but the values are not visible in the subsequent build
+# stages unless re-declared *after* FROM. We do that re-declaration further
+# down before using them again.
+ARG AIRFLOW_VERSION=2.10.3
+ARG PYTHON_VERSION=3.11
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
 
 # -----------------------------------------------------------------------------
 # System packages (root for apt).
@@ -63,6 +74,9 @@ RUN apt-get update \
 # extras get installed at versions Airflow knows are compatible.
 USER airflow
 
+# Re-declare the same ARGs to inherit the values from the pre-FROM block.
+# (Defaults are repeated for safety -- if someone strips the pre-FROM ARGs
+# they still get sensible values here.)
 ARG AIRFLOW_VERSION=2.10.3
 ARG PYTHON_VERSION=3.11
 ENV CONSTRAINTS_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"

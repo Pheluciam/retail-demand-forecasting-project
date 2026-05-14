@@ -29,6 +29,12 @@ Usage (PowerShell, venv activated):
         --start-date 2011-01-29 --end-date 2013-12-31
 
 Reads connection details from .env (gitignored).
+
+CLI CONTRACT NOTE -- DO NOT change the --run-date / --start-date / --end-date
+flag names or their accepted formats without also updating
+airflow/dags/m5_daily_extract.py, which imports this module and invokes
+main() with a synthesised sys.argv. A flag rename here will silently break
+the DAG at run time (not parse time).
 """
 
 import argparse

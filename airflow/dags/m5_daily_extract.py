@@ -26,7 +26,7 @@ disconnect mid-stream, etc.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pendulum
@@ -40,6 +40,7 @@ from airflow.decorators import dag, task
 # docker-compose mounts the project's scripts/ folder at /opt/airflow/scripts
 # read-only and we set PYTHONPATH there. The path-insert below is belt-and-
 # braces in case PYTHONPATH gets unset by some Airflow internal.
+
 SCRIPTS_DIR = Path("/opt/airflow/scripts")
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -48,6 +49,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 # -----------------------------------------------------------------------------
 # Default args -- applied to every task in the DAG unless overridden.
 # -----------------------------------------------------------------------------
+
 DEFAULT_ARGS = {
     "owner": "phil",
     "depends_on_past": False,
@@ -77,6 +79,7 @@ DEFAULT_ARGS = {
     default_args=DEFAULT_ARGS,
     tags=["m5", "extract", "phase3"],
 )
+
 def m5_daily_extract():
 
     @task(task_id="extract_one_day")
