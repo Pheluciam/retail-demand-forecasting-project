@@ -1,0 +1,30 @@
+# =============================================================================
+# Minimal extra-deps for the custom Airflow image.
+# =============================================================================
+# Why a separate file from the project-root requirements.txt:
+#
+#   * The Airflow base image already installs pandas, SQLAlchemy, etc., and
+#     pins them to versions Airflow 2.10.3 has tested with (see Airflow's
+#     constraints file used in the Dockerfile).
+#   * The project-root requirements.txt has `sqlalchemy>=2.0.0` and
+#     `pandas>=2.0.0` -- those minimum-version pins conflict with Airflow's
+#     constraint pins (SQLAlchemy 1.4.x, pandas 2.1.x) and cause the pip
+#     install to fail.
+#   * This file lists ONLY the extras the extract script needs that aren't
+#     in the Airflow base image. No version pins -- the --constraint flag
+#     in the Dockerfile picks versions for us.
+#
+# Don't add `pandas`, `sqlalchemy`, or anything else Airflow already installs.
+# Run `pip list` inside a built container to see what's already there.
+# =============================================================================
+
+# Microsoft ODBC bindings for Python -- needed to talk to Azure SQL.
+# Backed by the msodbcsql17 system package installed via apt in the Dockerfile.
+pyodbc
+
+# Loads .env files into os.environ on script start.
+python-dotenv
+
+# Snowflake Python connector. [pandas] extra pulls in pyarrow and unlocks
+# snowflake.connector.pandas_tools.write_pandas() for bulk loads.
+snowflake-connector-python[pandas]

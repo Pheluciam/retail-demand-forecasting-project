@@ -200,8 +200,29 @@ Disk file existing ≠ SQL has been run. The two must be reconciled: write to di
 
 ### Airflow
 
-_(to be populated during Phase 3 — Docker compose stack, DAG patterns, scheduling,
-failure handling, secrets management)_
+**Stack architecture choices (2026-05-14, Phase 3 session 1)**
+
+- **Self-contained `airflow/` subdirectory.** Everything Airflow-related — `docker-compose.yml`, the custom `Dockerfile`, `requirements-airflow.txt`, `dags/`, `plugins/`, `logs/` — lives under one folder. Project root stays clean. The compose file mounts the parent project's `scripts/` folder read-only into the containers so the DAG can call the existing `extract_azure_to_snowflake.py` without code duplication.
+- **LocalExecutor, not CeleryExecutor.** Airflow has several "executor" engines deciding how tasks actually run. LocalExecutor runs each task as a subprocess on the scheduler container — adequate for a single-DAG portfolio project. CeleryExecutor adds a Redis broker plus N worker containers — required at production scale, overkill here. Worth knowing the upgrade path exists: same DAG code, just swap executor + add services in compose.
+- **Four containers in the stack.** `postgres` (Airflow's own metadata DB, not our retail data), `airflow-init` (one-shot bootstrap that runs `airflow db migrate` and creates the admin user, then exits), `airflow-webserver` (UI at `localhost:8080`), `airflow-scheduler` (parses DAGs, schedules + runs tasks). Init `depends_on: postgres: condition: service_healthy`; webserver and scheduler `depends_on: airflow-init: condition: service_completed_successfully` — ordered startup is declarative.
+- **One `.env`, two execution environments.** `env_file: - ../.env` in the compose anchor passes our existing Azure SQL + Snowflake creds into every Airflow container as env vars. The extract script's `os.getenv("AZURE_SQL_SERVER")` calls work identically inside Airflow and from PowerShell — zero environment-specific branching in our code. One source of truth for secrets.
+
+**Custom Airflow image — never reuse the project-root `requirements.txt` (2026-05-14, Phase 3 session 1)**
+
+Two-stage failure during the first build of the custom Airflow image. Worth capturing both stages because each one teaches something separate.
+
+- **Stage 1 — no `--constraint` flag, install our `requirements.txt` directly.** Build succeeded. Then the `airflow-init` container immediately crashed at runtime with `sqlalchemy.orm.exc.MappedAnnotationError: Type annotation for "TaskInstance.dag_model" can't be correctly interpreted for Annotated Declarative Table form.` Diagnosis: Airflow 2.10 needs SQLAlchemy **1.4.x**. Our `requirements.txt` has `sqlalchemy>=2.0.0`. pip happily upgraded SQLAlchemy past what Airflow could handle. The base image worked, our pip step broke it.
+- **Stage 2 — same `requirements.txt`, now with `--constraint` pointing at Airflow's official constraints file.** Build failed at the pip step with a dependency-resolution error. Why: the constraint says "SQLAlchemy must be 1.4.x", our requirement says "SQLAlchemy must be ≥ 2.0.0" — pip refuses to resolve a direct conflict rather than silently picking one. So `--constraint` alone wasn't enough; the underlying disagreement between our requirements file and Airflow's needs still had to be fixed.
+
+**The fix that worked: separate `airflow/requirements-airflow.txt` with no version pins.** Lists only the extras our extract script needs that aren't already in the Airflow base image (`pyodbc`, `python-dotenv`, `snowflake-connector-python[pandas]`). The `--constraint` flag pointed at `https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt` then chooses tested versions for everything. Build clean, runtime clean.
+
+**General principle for any custom image extending an opinionated base.** Don't blanket-apply your existing pin lists onto an image whose maintainers have already thought hard about compatible versions. List only the *additional* packages you need, leave them unpinned, and let the base image's constraints/lockfile decide versions. Same lesson would apply to a custom `dbt-core` Docker image, a custom Jupyter image, or anything else where you're layering deps onto a curated stack.
+
+**Mistakes & diagnoses carry-forward:** add "look at constraints/lockfile of base image before adding deps" to the Code-Quality checklist as an implicit corollary of criterion 1 (Currency). Also a Project #3 carry-forward — most production Docker images extend an opinionated base.
+
+**Docker daemon must be running before `docker compose` (2026-05-14, Phase 3 session 1)**
+
+Trivial-in-hindsight but worth noting because the error message is opaque: `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`. That long path is Docker Desktop's named pipe on Windows. The error is just "Docker Desktop isn't running." Fix: open Docker Desktop from the Start menu, wait for the whale icon in the taskbar to stop animating (settles to solid), then retry. The CLI (`docker`, `docker compose`) is a thin client that talks to a background service — the service has to be alive for any command to work.
 
 ### dbt (advanced from Project #1)
 

@@ -158,6 +158,76 @@ def connect_azure_sql():
     return engine
 
 
+# -----------------------------------------------------------------------------
+# 4a. Azure SQL cold-start wake helper.
+# -----------------------------------------------------------------------------
+# Free Serverless auto-pauses after ~1 hour idle. The first cold connect of
+# a session can fail in one of two transient ways that the 90s
+# connect_args["timeout"] does NOT cover, because the failure isn't a
+# client-side timeout -- the server responds immediately with an error code:
+#
+#   * 40613 -- "Database '...' is not currently available. Please retry the
+#              connection later." Gateway signal that wake-up is in progress.
+#              Hit this on the very first connect of the 2026-05-14 backfill.
+#   * 40197 -- "The service is busy / encountered an error processing your
+#              request." Same family -- transient, retry-safe.
+#
+# Manual fix at the time: Start-Sleep -Seconds 45 then re-run. This helper
+# automates that pattern. It's particularly important once Airflow wraps
+# this script: every scheduled run after overnight idle will hit a cold
+# Azure SQL, and absorbing the wake here is cheaper than burning an entire
+# Airflow task retry (each attempt re-imports the script, re-reads .env,
+# re-opens Snowflake -- ~30s of wasted setup per retry).
+
+def wake_azure_sql(engine, retries: int = 3, delay_sec: int = 45) -> None:
+    """Touch Azure SQL with a cheap SELECT 1 until it answers cleanly.
+
+    Retries on the two known cold-start transient SQL error codes:
+        * 40613 -- database paused, waking up
+        * 40197 -- service busy
+
+    Re-raises the original exception unchanged for any other failure
+    (auth, network, firewall, etc.) so real errors aren't masked by the
+    retry loop.
+    """
+    # Local import: keeps top-of-file imports tidy and makes the helper
+    # self-contained for anyone reading it in isolation.
+    from sqlalchemy import text
+
+    transient_codes = ("40613", "40197")
+
+    for attempt in range(1, retries + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            log.info("Azure SQL wake OK (attempt %d/%d).", attempt, retries)
+            return
+        except Exception as e:  # noqa: BLE001 -- intentional broad catch
+            msg = str(e)
+            is_transient = any(code in msg for code in transient_codes)
+
+            if not is_transient:
+                # Real error -- don't waste retries, surface it immediately.
+                log.error("Azure SQL wake failed with non-transient error: %s",
+                          msg.split("\n")[0])
+                raise
+
+            if attempt == retries:
+                log.error(
+                    "Azure SQL still unavailable after %d attempts. "
+                    "Last error: %s", retries, msg.split("\n")[0],
+                )
+                raise
+
+            log.warning(
+                "Azure SQL transient (attempt %d/%d, codes %s) -- "
+                "sleeping %ds before retry. Detail: %s",
+                attempt, retries, "/".join(transient_codes),
+                delay_sec, msg.split("\n")[0],
+            )
+            time.sleep(delay_sec)
+
+
 def connect_snowflake():
     """Native Snowflake connector (required by write_pandas)."""
     conn = snowflake.connector.connect(
@@ -403,6 +473,9 @@ def main() -> int:
     overall_start = time.time()
 
     engine_az = connect_azure_sql()
+    # Absorb cold-start 40613/40197 here so Airflow's task-level retries=2
+    # is a real backstop, not the first line of defence.
+    wake_azure_sql(engine_az)
     conn_sf = connect_snowflake()
     try:
         mapping = get_date_mapping(engine_az, args.start_date, args.end_date)

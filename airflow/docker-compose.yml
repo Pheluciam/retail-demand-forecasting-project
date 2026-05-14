@@ -1,0 +1,168 @@
+# =============================================================================
+# Local Airflow stack for the retail-demand-forecasting pipeline.
+#
+# Components:
+#   postgres            -- Airflow's metadata DB (DAG runs, task state, users)
+#   airflow-init        -- one-shot: db migrate + create admin user, then exits
+#   airflow-webserver   -- the UI on http://localhost:8080
+#   airflow-scheduler   -- the brain: parses DAGs, schedules + runs tasks
+#
+# Executor: LocalExecutor (tasks run as scheduler subprocesses). No Celery,
+# no Redis -- adequate for a single-DAG portfolio project.
+#
+# Quick start (from this airflow/ directory):
+#   docker compose build              # build the custom image (first time only)
+#   docker compose up airflow-init    # one-shot bootstrap (db + admin user)
+#   docker compose up -d              # boot the long-running services
+#   docker compose ps                 # health check the containers
+#   docker compose logs -f scheduler  # follow scheduler logs
+#   docker compose down               # stop & remove containers (keeps volumes)
+#   docker compose down -v            #   ...AND wipe the postgres volume
+#
+# Web UI:   http://localhost:8080
+# Login:    airflow / airflow   (defined in airflow-init below)
+#
+# Phil's M5 pipeline secrets (AZURE_SQL_*, SNOWFLAKE_*) are loaded from the
+# project-root .env via env_file. They become container env vars and
+# scripts/extract_azure_to_snowflake.py reads them via os.getenv() exactly
+# the same way it does when run from PowerShell -- one .env, two execution
+# environments.
+# =============================================================================
+
+# YAML anchor: shared config for the three Airflow services (init, webserver,
+# scheduler) so we don't repeat ~20 lines three times. `&airflow-common`
+# defines the anchor; `<<: *airflow-common` in each service merges it in.
+x-airflow-common:
+  &airflow-common
+  build:
+    # Build context = parent project dir, so the Dockerfile can COPY ../requirements.txt
+    context: ..
+    dockerfile: airflow/Dockerfile
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Make the mounted scripts/ folder importable AND scripts inside it
+    # discoverable as runnable Python modules.
+    PYTHONPATH: /opt/airflow/scripts
+  # M5 pipeline secrets -- one source of truth, the project-root .env.
+  # env_file values override `environment:` if the same key is set in both.
+  env_file:
+    - ../.env
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    # The existing extract script, read-only inside the container. The DAG
+    # imports/invokes it from /opt/airflow/scripts.
+    - ../scripts:/opt/airflow/scripts:ro
+  # AIRFLOW_UID: on Linux hosts this should match your host user's UID to
+  # avoid permission issues on the bind-mounted logs/dags folders. On
+  # Windows/Mac with Docker Desktop, the default 50000 (the airflow user
+  # inside the image) is fine because Desktop handles the UID mapping.
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------------------
+  # Postgres: Airflow's OWN metadata DB. Not our retail data.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # One-shot init: runs `airflow db migrate` and creates the admin user.
+  # Exits 0 when done. Webserver + scheduler `depends_on` this completing.
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    # The user-create command is wrapped in `( ... ) || echo` so it returns
+    # success even on the second run when the user already exists. Without
+    # this, re-running `docker compose up` after the first successful init
+    # would crash init (airflow CLI exits non-zero on duplicate user),
+    # which would prevent webserver + scheduler from ever starting due to
+    # their `depends_on: airflow-init: service_completed_successfully`.
+    # `airflow db migrate` is already idempotent so it doesn't need wrapping.
+    command:
+      - -c
+      - |
+        airflow db migrate && \
+        ( airflow users create \
+            --username airflow \
+            --firstname Phil \
+            --lastname M \
+            --role Admin \
+            --email phil@example.local \
+            --password airflow \
+        ) || echo "Admin user already exists -- skipping create (this is fine)."
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+    # Init doesn't restart -- it's a one-shot.
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Webserver: the UI on localhost:8080.
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Scheduler: parses DAG files, schedules runs, executes tasks (LocalExecutor).
+  # ---------------------------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db-volume:
