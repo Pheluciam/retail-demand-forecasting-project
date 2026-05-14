@@ -2,7 +2,7 @@
 
 > Working document for Project #2 of the data engineering portfolio.
 > Architecture diagram and overview are employer-shareable.
-> Created: 2026-05-09. Updated as work progresses.
+> Created: 2026-05-09. Last meaningfully updated: 2026-05-15 (Phase 3 in flight).
 
 ---
 
@@ -12,13 +12,13 @@ A **production-grade retail demand-planning analytics platform** built end-to-en
 
 **The headline:** orchestration. The pipeline runs end-to-end on a schedule, with proper failure handling, tests, and CI — not button-pressed like Project #1.
 
-| | |
-|---|---|
-| **Project name** | Retail Demand & Forecasting Pipeline |
-| **Repo slug** | `retail-demand-forecasting-project` |
-| **Domain** | Retail demand planning, S&OP operations, forecasting |
-| **Dataset** | M5 Forecasting (Kaggle, public — Walmart daily sales 2011–2016) |
-| **Estimated effort** | 12–16 sessions × 2–3 hours each (~30–45 hours total) |
+|                      |                                                                 |
+| -------------------- | --------------------------------------------------------------- |
+| **Project name**     | Retail Demand & Forecasting Pipeline                            |
+| **Repo slug**        | `retail-demand-forecasting-project`                             |
+| **Domain**           | Retail demand planning, S&OP operations, forecasting            |
+| **Dataset**          | M5 Forecasting (Kaggle, public — Walmart daily sales 2011–2016) |
+| **Estimated effort** | 12–16 sessions × 2–3 hours each (~30–45 hours total)            |
 
 ---
 
@@ -61,52 +61,35 @@ flowchart TB
 
 ## Locked decisions (no more drift)
 
-| Decision | Choice |
-|---|---|
-| **Project name** | Retail Demand & Forecasting Pipeline |
-| **Repo slug** | `retail-demand-forecasting-project` |
-| **Domain** | Retail demand planning, S&OP operations, forecasting (forecast surfacing only — no ML modelling pipeline) |
-| **Source database** | MS SQL Server (Docker locally OR Azure SQL — pending Azure portal check) |
-| **Dataset** | M5 Forecasting (Kaggle, public) |
-| **Cloud warehouse** | Snowflake (free trial, sign up when ready in Phase 2) |
-| **Transformation** | dbt-snowflake with `dbt_utils`, tests, packages, marts layer |
-| **Architecture** | Kimball star + dedicated marts + partitioned incremental fact builds |
-| **Orchestration** | Apache Airflow in Docker |
-| **BI tool** | Power BI (Service if licence allows, Desktop otherwise) |
-| **CI/CD** | GitHub Actions running `dbt parse` + tests + `sqlfluff` (stretch goal) |
-| **API ingestion** | Deferred to Project #3 (financial markets / lakehouse) |
-| **Forecasting modelling** | Deferred (forecast surfacing in dbt only — 28-day baseline) |
-| **Ingestion pattern** | **Simulated freshness (Option B):** all M5 history bulk-loaded into Azure SQL once. Airflow DAG extracts ONE date-partitioned slice per scheduled run (`WHERE sale_date BETWEEN '{{ data_interval_start }}' AND '{{ data_interval_end }}'`). Makes incremental dbt models, tests, and alerts behave like a live pipeline rather than theatre. |
+| Decision                  | Choice                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Project name**          | Retail Demand & Forecasting Pipeline                                                                                                                                                                                                                                                                                                          |
+| **Repo slug**             | `retail-demand-forecasting-project`                                                                                                                                                                                                                                                                                                           |
+| **Domain**                | Retail demand planning, S&OP operations, forecasting (forecast surfacing only — no ML modelling pipeline)                                                                                                                                                                                                                                     |
+| **Source database**       | Azure SQL Database — Serverless General Purpose Free tier with auto-pause                                                                                                                                                                                                                                                                     |
+| **Dataset**               | M5 Forecasting (Kaggle, public)                                                                                                                                                                                                                                                                                                               |
+| **Cloud warehouse**       | Snowflake (free trial, sign up when ready in Phase 2)                                                                                                                                                                                                                                                                                         |
+| **Transformation**        | dbt-snowflake with `dbt_utils`, tests, packages, marts layer                                                                                                                                                                                                                                                                                  |
+| **Architecture**          | Kimball star + dedicated marts + partitioned incremental fact builds                                                                                                                                                                                                                                                                          |
+| **Orchestration**         | Apache Airflow in Docker                                                                                                                                                                                                                                                                                                                      |
+| **BI tool**               | Power BI (Service if licence allows, Desktop otherwise)                                                                                                                                                                                                                                                                                       |
+| **CI/CD**                 | GitHub Actions running `dbt parse` + tests + `sqlfluff` (stretch goal)                                                                                                                                                                                                                                                                        |
+| **API ingestion**         | Deferred to Project #3 (financial markets / lakehouse)                                                                                                                                                                                                                                                                                        |
+| **Forecasting modelling** | Deferred (forecast surfacing in dbt only — 28-day baseline)                                                                                                                                                                                                                                                                                   |
+| **Ingestion pattern**     | **Simulated freshness (Option B):** all M5 history bulk-loaded into Azure SQL once. Airflow DAG extracts ONE date-partitioned slice per scheduled run (`WHERE sale_date BETWEEN '{{ data_interval_start }}' AND '{{ data_interval_end }}'`). Makes incremental dbt models, tests, and alerts behave like a live pipeline rather than theatre. |
 
 ---
 
 ## Pre-flight checklist
 
-Run through these **before opening any folder or touching code**. Each is a 5–10-minute check.
+Pre-flight checklist completed during Phase 0.
+See `PROJECT_CONTEXT.md` → "Pre-flight check results" for the verified state.
 
-### Hardware & dev environment
+### Decisions confirmed post-checklist
 
-- [ ] **RAM available.** Task Manager → Performance → Memory. Target ≥ 16 GB free; ≥ 8 GB workable with leaner stack
-- [ ] **Disk space.** Need ~30 GB free (M5 raw + database + Docker images)
-- [ ] **Docker Desktop installed and running** (with WSL 2 backend on Windows). If not, install from docker.com
-- [ ] **VS Code installed** with extensions: Python, Docker, dbt Power User (or similar), SQL Server (mssql), Snowflake (optional)
-- [ ] **Python 3.11+** available on PATH (or fresh install)
-- [ ] **Git** installed and signed in (PAT or SSH key working from Project #1)
-
-### Accounts & licences
-
-- [ ] **Kaggle account.** Sign up at kaggle.com (free), accept M5 competition rules at kaggle.com/competitions/m5-forecasting-accuracy/data
-- [ ] **Kaggle API token** generated under Account → API → Create New Token (saves the `kaggle.json` file — needed for scripted download)
-- [ ] **Azure portal check.** Sign in at portal.azure.com → Subscriptions. Note status: free trial active / used / never used. Determines whether MS SQL Server runs in Docker locally or as Azure SQL Database
-- [ ] **Microsoft 365 / Power BI Service licence?** Note Y/N. If Y, plan to publish dashboard. If N, Desktop + screenshots in README is fine
-- [ ] **GitHub account active and SSH/PAT working** (carryover from Project #1)
-- [ ] **Snowflake free trial: do NOT sign up yet.** 30-day clock starts on signup. Wait until Phase 2
-
-### Decisions to confirm post-checklist
-
-- [ ] MS SQL Server hosting: Docker locally / Azure SQL Database / other
-- [ ] Power BI publication: Service (live link) / Desktop (screenshots)
-- [ ] CI/CD scope: in-scope from Phase 5 / stretch only
+- Source database hosting: **Azure SQL Database** (Serverless General Purpose Free tier, auto-pause).
+- Power BI publication: **Desktop + screenshots in README** (no Service licence).
+- CI/CD scope: **stretch goal only** — `dbt parse` + tests + `sqlfluff` via GitHub Actions if time allows in Phase 6.
 
 ---
 
@@ -114,16 +97,16 @@ Run through these **before opening any folder or touching code**. Each is a 5–
 
 Sessions are ~2–3 hours each. Times are honest estimates including troubleshooting. Pace is up to you — this is a "couple of sessions a week" or "every day if motivated" plan, not a deadline.
 
-| Phase | Sessions | What happens | Deliverables at end |
-|---|---|---|---|
-| **Phase 0 — Setup** | 1 | Pre-flight checks confirmed. Final hosting decisions. Repo created on GitHub (public). Folder structure scaffolded with `README.md`, `LEARNINGS.md`, `PROJECT_CONTEXT.md`, `.gitignore`. Python venv. Naming conventions document committed. First commit pushed | Empty repo, conventions doc, README skeleton |
-| **Phase 1 — Source database** | 1–2 | MS SQL Server up (Docker or Azure SQL). Connect from VS Code / Azure Data Studio. M5 raw CSVs downloaded from Kaggle. Bulk load all 5 M5 files into MS SQL Server. Verify row counts, character encoding, sample queries | 6 raw tables in MS SQL Server with verified data |
-| **Phase 2 — Snowflake + extraction** | 2–3 | Snowflake free trial signed up (clock starts). Warehouse / database / schema / role provisioned. Python extract-and-load job: MS SQL → Snowflake staging via `pyodbc` → Pandas → `snowflake-connector-python` → `COPY INTO`. **Extract is date-parameterised from day 1** (takes a `run_date` arg). Test single-table extract first, then all-tables | All 6 raw tables landed in Snowflake `RAW` schema; extract script accepts a date param |
-| **Phase 3 — Airflow orchestration** | 2 | Airflow Docker compose stack up locally. First DAG: extract MS SQL → load Snowflake → run on schedule, **passing `{{ data_interval_start }}` to the date-parameterised extract so each run picks up one new day of M5 history (simulated freshness)**. Failure handling and email/log alerts. Containerise the Python extract job. Manual trigger and scheduled trigger both validated | Working DAG runs end-to-end on schedule, advancing one M5 day per run |
-| **Phase 4 — dbt transformations** | 3–4 | dbt-snowflake configured. Sources defined. **Staging layer** (incl. wide-to-long unpivot of M5 sales). Intermediate. **Warehouse layer**: `dim_item`, `dim_store`, `dim_calendar`, `fact_daily_sales` (partitioned, incremental). dbt tests on every dim's primary key. Surrogate keys via `dbt_utils.generate_surrogate_key`. **Marts layer**: one mart per dashboard page (5 marts) | Full dbt project building cleanly with passing tests |
-| **Phase 5 — Power BI** | 2–3 | Snowflake native connector configured. Five marts loaded. Relationships established (single-direction Many-to-One). Five pages built: Executive Overview, Demand by Hierarchy, Promotion & Price Analysis, Seasonality & Calendar, Forecast vs Actual. Cross-page sync slicers. Drill-throughs. Format painter pass for consistency. DAX measures explicit (not implicit). Theme applied | Polished `.pbix` file with 5 pages |
-| **Phase 6 — Polish & ship** | 1–2 | README expanded with architecture diagram, screenshots, "how to run" section, business problem statement, tech-stack rationale. `LEARNINGS.md` final pass. Stretch: GitHub Actions CI workflow with `dbt parse`, tests, `sqlfluff` lint. Tag `v1.0` release. Public repo confirmed | Shippable portfolio piece |
-| **Total** | **12–16** | | |
+| Phase                                | Sessions  | What happens                                                                                                                                                                                                                                                                                                                                                                             | Deliverables at end                                                                    |
+| ------------------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Phase 0 — Setup**                  | 1         | Pre-flight checks confirmed. Final hosting decisions. Repo created on GitHub (public). Folder structure scaffolded with `README.md`, `LEARNINGS.md`, `PROJECT_CONTEXT.md`, `.gitignore`. Python venv. Naming conventions document committed. First commit pushed                                                                                                                         | Empty repo, conventions doc, README skeleton                                           |
+| **Phase 1 — Source database**        | 1–2       | MS SQL Server up (Docker or Azure SQL). Connect from VS Code / Azure Data Studio. M5 raw CSVs downloaded from Kaggle. Bulk load all 5 M5 files into MS SQL Server. Verify row counts, character encoding, sample queries                                                                                                                                                                 | 6 raw tables in MS SQL Server with verified data                                       |
+| **Phase 2 — Snowflake + extraction** | 2–3       | Snowflake free trial signed up (clock starts). Warehouse / database / schema / role provisioned. Python extract-and-load job: MS SQL → Snowflake staging via `pyodbc` → Pandas → `snowflake-connector-python` → `COPY INTO`. **Extract is date-parameterised from day 1** (takes a `run_date` arg). Test single-table extract first, then all-tables                                     | All 6 raw tables landed in Snowflake `RAW` schema; extract script accepts a date param |
+| **Phase 3 — Airflow orchestration**  | 2         | Airflow Docker compose stack up locally. First DAG: extract MS SQL → load Snowflake → run on schedule, **passing `{{ data_interval_start }}` to the date-parameterised extract so each run picks up one new day of M5 history (simulated freshness)**. Failure handling and email/log alerts. Containerise the Python extract job. Manual trigger and scheduled trigger both validated   | Working DAG runs end-to-end on schedule, advancing one M5 day per run                  |
+| **Phase 4 — dbt transformations**    | 3–4       | dbt-snowflake configured. Sources defined. **Staging layer** (incl. wide-to-long unpivot of M5 sales). Intermediate. **Warehouse layer**: `dim_item`, `dim_store`, `dim_calendar`, `fact_daily_sales` (partitioned, incremental). dbt tests on every dim's primary key. Surrogate keys via `dbt_utils.generate_surrogate_key`. **Marts layer**: one mart per dashboard page (5 marts)    | Full dbt project building cleanly with passing tests                                   |
+| **Phase 5 — Power BI**               | 2–3       | Snowflake native connector configured. Five marts loaded. Relationships established (single-direction Many-to-One). Five pages built: Executive Overview, Demand by Hierarchy, Promotion & Price Analysis, Seasonality & Calendar, Forecast vs Actual. Cross-page sync slicers. Drill-throughs. Format painter pass for consistency. DAX measures explicit (not implicit). Theme applied | Polished `.pbix` file with 5 pages                                                     |
+| **Phase 6 — Polish & ship**          | 1–2       | README expanded with architecture diagram, screenshots, "how to run" section, business problem statement, tech-stack rationale. `LEARNINGS.md` final pass. Stretch: GitHub Actions CI workflow with `dbt parse`, tests, `sqlfluff` lint. Tag `v1.0` release. Public repo confirmed                                                                                                       | Shippable portfolio piece                                                              |
+| **Total**                            | **12–16** |                                                                                                                                                                                                                                                                                                                                                                                          |                                                                                        |
 
 ---
 
@@ -144,34 +127,34 @@ These are non-negotiable from day 1, locked from `LEARNINGS.md` carry-forward se
 
 ### Naming conventions
 
-| Object | Convention | Example |
-|---|---|---|
-| All identifiers | `snake_case` | `daily_sales` |
-| Surrogate keys | `<entity>_key` | `item_key`, `store_key` |
-| Natural / business keys | `<entity>_id` | `item_id`, `store_id` |
-| Fact tables | `fact_<grain>_<entity>` | `fact_daily_sales` |
-| Dim tables | `dim_<entity>` | `dim_item`, `dim_store`, `dim_calendar` |
-| Staging models | `stg_<source>_<entity>` | `stg_m5_sales` |
-| Intermediate models | `int_<purpose>` | `int_sales_with_prices` |
-| Mart models | `mart_<purpose>` | `mart_daily_sales_by_store` |
-| Date column in facts | `sale_date` (DATE type, partition key) | |
-| Currency / amounts | `<noun>_amount_usd` (units in name) | `revenue_amount_usd` |
+| Object                  | Convention                             | Example                                 |
+| ----------------------- | -------------------------------------- | --------------------------------------- |
+| All identifiers         | `snake_case`                           | `daily_sales`                           |
+| Surrogate keys          | `<entity>_key`                         | `item_key`, `store_key`                 |
+| Natural / business keys | `<entity>_id`                          | `item_id`, `store_id`                   |
+| Fact tables             | `fact_<grain>_<entity>`                | `fact_daily_sales`                      |
+| Dim tables              | `dim_<entity>`                         | `dim_item`, `dim_store`, `dim_calendar` |
+| Staging models          | `stg_<source>_<entity>`                | `stg_m5_sales`                          |
+| Intermediate models     | `int_<purpose>`                        | `int_sales_with_prices`                 |
+| Mart models             | `mart_<purpose>`                       | `mart_daily_sales_by_store`             |
+| Date column in facts    | `sale_date` (DATE type, partition key) |                                         |
+| Currency / amounts      | `<noun>_amount_usd` (units in name)    | `revenue_amount_usd`                    |
 
 ---
 
 ## Risk register & mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| RAM constraint (Docker stack heavy) | Medium | High | Pre-flight RAM check; fall back to Airflow LocalExecutor or Azure SQL if tight |
-| Snowflake 30-day trial expires mid-project | Medium | Medium | Don't sign up until Phase 2. X-SMALL warehouse only. Suspend when not in use |
-| M5 wide-to-long shape causes ingestion confusion | Low | Low | Plan unpivot in dbt staging from day 1 — flagged in `stg_m5_sales` |
-| Power BI choking on 58M-row raw fact | Low | High | Discipline rule: Power BI only ever connects to `marts/` — never raw or warehouse-fact |
-| UTF-8 / encoding bugs (Project #1 repeat) | Low | Medium | Explicit `encoding='utf-8'` on all Python file ops. `nvarchar` (not `varchar`) in MS SQL Server |
-| Naming inconsistency drift | Medium | Medium | Conventions table above is committed to repo Phase 0. No exceptions |
-| Airflow first-time-setup pain | High | Medium | Use Astronomer's official `docker-compose.yml` template — well-documented, low-friction starting point |
-| Scope creep (forecasting ML, weather API, more pages) | High | Medium | This document is the contract. Anything not listed is Project #3 candidate or stretch goal |
-| Auto-detected relationships in Power BI (Project #1 repeat) | Medium | Low | Disable autodetect on first model load. Manage Relationships pass after every refresh |
+| Risk                                                        | Likelihood | Impact | Mitigation                                                                                             |
+| ----------------------------------------------------------- | ---------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| RAM constraint (Docker stack heavy)                         | Medium     | High   | Pre-flight RAM check; fall back to Airflow LocalExecutor or Azure SQL if tight                         |
+| Snowflake 30-day trial expires mid-project                  | Medium     | Medium | Don't sign up until Phase 2. X-SMALL warehouse only. Suspend when not in use                           |
+| M5 wide-to-long shape causes ingestion confusion            | Low        | Low    | Plan unpivot in dbt staging from day 1 — flagged in `stg_m5_sales`                                     |
+| Power BI choking on 58M-row raw fact                        | Low        | High   | Discipline rule: Power BI only ever connects to `marts/` — never raw or warehouse-fact                 |
+| UTF-8 / encoding bugs (Project #1 repeat)                   | Low        | Medium | Explicit `encoding='utf-8'` on all Python file ops. `nvarchar` (not `varchar`) in MS SQL Server        |
+| Naming inconsistency drift                                  | Medium     | Medium | Conventions table above is committed to repo Phase 0. No exceptions                                    |
+| Airflow first-time-setup pain                               | High       | Medium | Use Astronomer's official `docker-compose.yml` template — well-documented, low-friction starting point |
+| Scope creep (forecasting ML, weather API, more pages)       | High       | Medium | This document is the contract. Anything not listed is Project #3 candidate or stretch goal             |
+| Auto-detected relationships in Power BI (Project #1 repeat) | Medium     | Low    | Disable autodetect on first model load. Manage Relationships pass after every refresh                  |
 
 ---
 
@@ -222,8 +205,8 @@ To avoid scope creep, these are out:
 
 ## Status
 
-| | |
-|---|---|
-| **Phase** | Pre-Phase 0 (planning) |
-| **Last updated** | 2026-05-09 |
-| **Next step** | Run pre-flight checklist, report results, then begin Phase 0 |
+|                  |                                                                        |
+| ---------------- | ---------------------------------------------------------------------- |
+| **Phase**        | Phase 3 — session 1 closed; session 2 next                             |
+| **Last updated** | 2026-05-15                                                             |
+| **Next step**    | See `PROJECT_CONTEXT.md` → "Where we are right now" for the live state |
