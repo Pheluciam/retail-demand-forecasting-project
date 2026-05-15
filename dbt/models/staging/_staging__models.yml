@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: stg_m5_calendar
+    description: "Staging view for the M5 calendar dimension. One row per date."
+    columns:
+      - name: calendar_date
+        description: "Calendar date (real DATE, cast from raw VARCHAR)."
+        data_tests:
+          - unique
+          - not_null
+      - name: d
+        description: "M5 day identifier ('d_1' .. 'd_1969'). Join key to stg_m5_sales_train."
+        data_tests:
+          - unique
+          - not_null
+      - name: wm_yr_wk
+        description: "Walmart fiscal year+week. Joins to stg_m5_sell_prices."
+
+  - name: stg_m5_sell_prices
+    description: "Staging view for weekly sell prices. One row per store × item × fiscal week."
+    columns:
+      - name: store_id
+        description: "Store identifier."
+        data_tests:
+          - not_null
+      - name: item_id
+        description: "Item identifier."
+        data_tests:
+          - not_null
+      - name: wm_yr_wk
+        description: "Walmart fiscal year+week."
+        data_tests:
+          - not_null
+      - name: sell_price
+        description: "Retail price (USD)."
+        data_tests:
+          - not_null
+
+  - name: stg_m5_sales_train
+    description: "Staging view for M5 daily sales. One row per item × store × day, with sale_date translated from d via stg_m5_calendar."
+    columns:
+      - name: id
+        description: "M5 series id, e.g. 'HOBBIES_1_001_CA_1_evaluation'."
+        data_tests:
+          - not_null
+      - name: item_id
+        description: "Item identifier."
+        data_tests:
+          - not_null
+      - name: store_id
+        description: "Store identifier."
+        data_tests:
+          - not_null
+      - name: d
+        description: "M5 day identifier — join key to stg_m5_calendar."
+        data_tests:
+          - not_null
+      - name: sale_date
+        description: "Real DATE, translated from d via stg_m5_calendar join."
+        data_tests:
+          - not_null
+      - name: units_sold
+        description: "Units sold for that item/store/day."
+        data_tests:
+          - not_null

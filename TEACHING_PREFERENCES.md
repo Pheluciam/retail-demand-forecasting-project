@@ -117,3 +117,5 @@ Three additional failsafes Claude should layer in by default:
 - Teach slow, but summarise mainly, Ill pick it up from doing it.
 - Will need quite a bit of clarifications with Python.
 - Git and PowerShell: teach incidentally as we work — no dedicated sessions. When we hit a `git commit`, branch, or shell command for the first time, briefly explain what it does and why, then move on. I'll pick these up by repetition through the project work.
+- **PowerShell commands: one command per code block, always.** Never bundle multiple commands into a single block. One block = one copy-paste = one execution. Even when commands chain naturally (e.g. `git add` then `git commit`), keep them in separate blocks. Added 2026-05-15 (Phase 4 session 2).
+- **End-of-session git cadence: one bundled commit per session.** Don't artificially split work into multiple logical commits for "clean history" — it adds back-and-forth and noise. One `git add` + one `git commit` + one `git push` per session closeout. Within-session pushes only when explicitly requested or when there's a real reason to back the work up to remote mid-session. Added 2026-05-15 (Phase 4 session 2).

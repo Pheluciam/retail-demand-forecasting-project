@@ -2,13 +2,51 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-15 (Phase 4 session 1 closed — dbt project scaffolded, Snowflake connection verified end-to-end).
+> Last updated: 2026-05-15 (Phase 4 session 2 closed — staging layer live end-to-end, 3 models + 14 tests passing).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 3 ✅ DONE. **Phase 4 session 1 ✅ DONE** — dbt project scaffolded, `profiles.yml` with `env_var()` shipped, `dbt debug` green against `RETAIL_DB.RAW` via `WH_RETAIL`. Next session opens **Phase 4 session 2** — wire up per-layer schema separation (the `generate_schema_name` macro + `+schema:` per folder), then `sources.yml` for the three RAW tables, then first staging models. Remaining Phase 3 stretch items (VS Code Dev Containers) still deferred to Phase 6.
+**Current phase:** Phase 3 ✅ DONE. **Phase 4 session 2 ✅ DONE** — staging layer is live in Snowflake. Three staging models (`stg_m5_calendar`, `stg_m5_sell_prices`, `stg_m5_sales_train`) materialised as views in `RETAIL_DB.STAGING`, 14 data tests passing including the LEFT-JOIN-as-sentinel pattern on `sale_date`. Per-layer schema separation wired up (`generate_schema_name` macro + `+schema:` per folder). `sources.yml` declared for the three RAW tables with freshness checks (all three PASS). Snowflake permission gap caught mid-session — RETAIL_ENGINEER lacked `CREATE SCHEMA` on `RETAIL_DB`; added via new `sql/snowflake/03_grant_dbt_privileges.sql` and back-ported into `00_provision_account.sql` so future fresh setups don't repeat the gap. Next session opens **Phase 4 session 3** — `dbt_utils` package install, first intermediate model (`int_sales_with_prices`), then opening the warehouse layer with `dim_calendar`. Remaining Phase 3 stretch items (VS Code Dev Containers) still deferred to Phase 6.
+
+**Last action (2026-05-15 afternoon — Phase 4 session 2):** Built the staging layer end-to-end. Per-layer schema separation wired up (custom `generate_schema_name` macro + `+schema:` per folder in `dbt_project.yml`) — clean schema names (STAGING, INTERMEDIATE, WAREHOUSE, MARTS) instead of dbt's default concatenation gotcha. `sources.yml` shipped with column docs + 36h/72h freshness thresholds (all three sources PASS on `dbt source freshness`); fixed a dbt 1.11 `PropertyMovedToConfigDeprecation` warning by nesting `loaded_at_field` + `freshness` under `config:`. Three staging models written: `stg_m5_calendar` (flat SELECT — cast date to DATE, snake-case SNAP columns), `stg_m5_sell_prices` (9-line passthrough), `stg_m5_sales_train` (CTE pattern with LEFT JOIN to `stg_m5_calendar` for `d_NNNN` → real DATE translation). 14 data tests in `_staging__models.yml` including the `sale_date NOT NULL` join sentinel. **Real bug caught mid-session:** first `dbt build --select staging` failed with Snowflake `Insufficient privileges to operate on database 'RETAIL_DB'` — the role didn't have `CREATE SCHEMA` on `RETAIL_DB`. Diagnosed with `SHOW GRANTS`, fixed with new `sql/snowflake/03_grant_dbt_privileges.sql` (single GRANT), re-ran successfully. 10-point audit applied at close: 8 ✅, 1 ⚠️ flagged for Phase 6 (sqlfluff), 1 ⚠️ closed in-session (eyeball SELECTs in Snowsight). Final state: `dbt build --select staging` → PASS=17 (3 views + 14 tests) in 4.5 seconds.
+
+**Files added this session (Phase 4 session 2):**
+
+- `dbt/macros/generate_schema_name.sql` — 8-line Jinja macro overriding dbt's default schema-name concatenation. Models land in clean schemas (STAGING / INTERMEDIATE / WAREHOUSE / MARTS) instead of `RAW_STAGING` etc. Header comment explains the why; full walkthrough in `DBT_PIPELINE.md`.
+- `dbt/models/staging/sources.yml` — declares the three RAW tables as the `m5` source. ~95 lines, mostly column documentation. Includes `config:` block with `loaded_at_field: LOADED_AT` and freshness thresholds (36h warn / 72h error). All three sources PASS on `dbt source freshness`.
+- `dbt/models/staging/stg_m5_calendar.sql` — staging view, ~20 lines. Casts `date` VARCHAR → DATE (renamed to `calendar_date` to avoid the SQL reserved word). Snake-cases SNAP flags. Materialises to `STAGING.STG_M5_CALENDAR`.
+- `dbt/models/staging/stg_m5_sell_prices.sql` — staging view, 9 lines. Pure passthrough minus `loaded_at`. Materialises to `STAGING.STG_M5_SELL_PRICES`.
+- `dbt/models/staging/stg_m5_sales_train.sql` — staging view, ~40 lines using the dbt-style-guide CTE pattern (source → calendar → joined). LEFT JOIN against `{{ ref('stg_m5_calendar') }}` to translate `d_NNNN` → real `sale_date`. Renames `sales` → `units_sold` for unambiguous meaning. Materialises to `STAGING.STG_M5_SALES_TRAIN`.
+- `dbt/models/staging/_staging__models.yml` — schema YAML documenting all three staging models + 14 `data_tests:` (2 `unique` + 12 `not_null`). The `sale_date NOT NULL` test is the calendar-join sentinel.
+- `sql/snowflake/03_grant_dbt_privileges.sql` — single `GRANT CREATE SCHEMA ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER`. Idempotent, includes `SHOW GRANTS` verification block. Created to fix the permission-boundary gap discovered mid-session.
+
+**Files updated this session (Phase 4 session 2):**
+
+- `dbt/dbt_project.yml` — added `+schema: STAGING / INTERMEDIATE / WAREHOUSE / MARTS` lines under each folder in the `models:` block. Four new lines total.
+- `sql/snowflake/00_provision_account.sql` — added `GRANT CREATE SCHEMA ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER` to the Phase 2 grant section so future fresh setups from this repo don't repeat the Phase 4 gap.
+- `LEARNINGS.md` — appended 8 new dbt-section entries: the grant-fix gap (headline, full root-cause/fix/discipline/carry-forward shape), Snowflake ownership model + interview line, `ref()` vs `source()`, the CTE staging pattern, LEFT-JOIN-as-sentinel, schema YAML naming convention, `dbt build` vs `run` vs `test`, and the dbt 1.11 freshness-config deprecation.
+- `DBT_PIPELINE.md` — six new sections: per-layer schema separation walkthrough, `sources.yml` declaration + freshness, staging Pattern A (flat) vs Pattern B (CTE) with a tests table, the join-sentinel pattern, the Snowflake permission boundary fix, and end-to-end verification block.
+- `PROJECT_CONTEXT.md` — this file, session 2 closeout.
+
+**Headline outcomes from this session (Phase 4 session 2):**
+
+- **Staging layer live end-to-end.** 3 view models materialised in `RETAIL_DB.STAGING`, 14 data tests passing. Pipeline now real from Azure SQL → Python extract → Snowflake RAW → dbt → Snowflake STAGING. 59M-row sales × 1969-row calendar LEFT JOIN runs in single-digit seconds.
+- **Permission-boundary gap caught and fixed cleanly.** First `dbt build` bounced off Snowflake RBAC; clean diagnostic discipline (SHOW GRANTS → identify gap → grant once → re-verify) avoided the "throw more grants and hope" trap. Snowflake's ownership model handled the rest. Lesson captured in LEARNINGS as the headline session 2 entry; `00_provision_account.sql` updated so future fresh setups don't repeat the gap.
+- **Three dbt patterns shipped that will be reused throughout the project:** (a) `{{ source() }}` for RAW table references + sources.yml decoupling, (b) `{{ ref() }}` for cross-model references + automatic DAG building, (c) the CTE chain pattern for any non-trivial model with debugging-by-swapping-the-final-SELECT.
+- **The LEFT-JOIN-as-sentinel pattern goes mainstream.** First explicit use in `stg_m5_sales_train` — defensive practice that surfaces data drift (calendar mismatches) as test failures instead of silent row drops. Will reuse on every staging/intermediate join going forward.
+- **10-point audit applied honestly.** 8 ✅, 1 ⚠️ (sqlfluff, deferred to Phase 6 by plan), 1 ⚠️ closed in-session (Snowsight eyeball SELECTs confirmed the date cast, SNAP rename, join translation, units_sold rename all worked at the row level).
+
+**Next session (Phase 4 session 3):**
+
+1. Install the `dbt_utils` package via `packages.yml` + `dbt deps` — opens up `generate_surrogate_key`, `unique_combination_of_columns`, and many other helpers.
+2. Add a compound-key uniqueness test on `stg_m5_sell_prices` `(store_id, item_id, wm_yr_wk)` now that `dbt_utils.unique_combination_of_columns` is available.
+3. First intermediate model — `int_sales_with_prices`. Joins `stg_m5_sales_train` to `stg_m5_sell_prices` via `wm_yr_wk` to attach a price to every sale row. Adds the revenue calculation (`units_sold * sell_price` AS `revenue_amount_usd`).
+4. Open the warehouse layer with `dim_calendar` — first dimension table, surrogate key via `dbt_utils.generate_surrogate_key`. Easy first dim because the source is already mostly a star-friendly shape.
+5. 10-point audit + doc updates + commit.
+
+---
 
 **Last action (2026-05-15 — Phase 4 session 1):** Scaffolded the dbt project from scratch using hand-scaffold (not `dbt init`) — every file authored deliberately. `dbt-snowflake 1.11.5` installed into existing `.venv` alongside the Phase 3 Airflow stub; pip surfaced the expected "multiple tools in one venv" warnings — all harmless, no dbt-side impact (see LEARNINGS). Wrote `dbt/dbt_project.yml` and `dbt/profiles.yml` (clean professional versions, walkthrough lives in new `DBT_PIPELINE.md`). `.gitignore` line 14 had a blanket `profiles.yml` ignore — added a `!dbt/profiles.yml` exception because our profile uses `env_var()` and is safe to commit. `dbt debug` passes end-to-end. **Mid-session pacing & teaching-format refinements** captured in `TEACHING_PREFERENCES.md`: (a) comments-above-the-line for inline code explanations (never end-of-line — horizontal scroll breaks reading flow); (b) three-layer pattern for every code-shaped file going forward — verbose-version-in-chat, clean-version-on-disk, walkthrough-doc-alongside.
 

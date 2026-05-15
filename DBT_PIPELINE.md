@@ -276,17 +276,251 @@ If `Connection test: [ERROR ...]` appears, troubleshoot in this order:
 
 ---
 
+## Per-layer schema separation — `generate_schema_name` macro
+
+By default, dbt concatenates `target.schema` (from `profiles.yml`) with
+the per-folder `+schema:` config in `dbt_project.yml`. So if the profile
+schema is `RAW` and a model's folder sets `+schema: STAGING`, the model
+lands in `RAW_STAGING`. Ugly, and noise for portfolio readers.
+
+The override at `dbt/macros/generate_schema_name.sql` rewrites that
+behaviour: if a model's folder declares a `+schema:`, use it directly
+without concatenation. Models land in `STAGING`, `INTERMEDIATE`,
+`WAREHOUSE`, `MARTS` cleanly.
+
+Wired up by adding `+schema:` per folder in `dbt_project.yml`:
+
+```yaml
+models:
+  retail_demand_forecasting:
+    staging:
+      +materialized: view
+      +schema: STAGING
+    intermediate:
+      +materialized: view
+      +schema: INTERMEDIATE
+    warehouse:
+      +materialized: table
+      +schema: WAREHOUSE
+    marts:
+      +materialized: table
+      +schema: MARTS
+```
+
+Standard pattern in production dbt projects. The override is small
+(~8 lines of Jinja) and almost never needs further changes.
+
+---
+
+## `sources.yml` — declaring the M5 source
+
+Lives at `dbt/models/staging/sources.yml`. Declares one source named
+`m5` covering the three RAW tables (CALENDAR, SELL_PRICES, SALES_TRAIN).
+
+Three things the file does:
+
+1. **Decoupling.** Every staging model references its raw table via
+   `{{ source('m5', 'CALENDAR') }}` instead of hard-coding
+   `RETAIL_DB.RAW.CALENDAR`. If the source moves (different schema,
+   different database, alias), update one line in `sources.yml` and
+   every downstream model still works.
+
+2. **Freshness checks.** Every RAW table has a `LOADED_AT` audit column
+   (added by the Phase 2 extract script). `sources.yml` declares this
+   field plus warn/error thresholds (36h warn, 72h error). Running
+   `dbt source freshness` queries `MAX(LOADED_AT)` from each source
+   and surfaces any stale data before downstream models run on it.
+
+3. **Documentation.** Table-level descriptions plus column-level
+   descriptions land in `dbt docs generate` output, giving portfolio
+   visitors a self-documenting data dictionary.
+
+The `freshness` and `loaded_at_field` keys sit inside a `config:` block
+under the source — required syntax from dbt 1.8+ (older flat syntax
+deprecated with a `PropertyMovedToConfigDeprecation` warning).
+
+**Verification:**
+
+```powershell
+dbt source freshness
+```
+
+Returns PASS / WARN / ERROR per source. All three M5 sources passed on
+first run after the Phase 3 backfill (LOADED_AT was hours old).
+
+---
+
+## Staging models — three files, two patterns
+
+Staging is the first dbt layer. **Job:** read each RAW table once,
+cast types, snake-case columns, drop columns nobody downstream needs.
+**Forbidden in strict practice:** joins, business logic, aggregations.
+
+This project bends the strict rule once — `stg_m5_sales_train` joins
+to `stg_m5_calendar` to translate the M5 `d_NNNN` day identifier into
+a real DATE. The join is fundamentally part of cleaning the source
+(every downstream model wants a real DATE), so it sits in staging
+rather than intermediate. Locked decision in `PROJECT_PLAN.md`.
+
+### Pattern A — simple SELECT-FROM-source (`stg_m5_sell_prices`)
+
+When the model has one logical step (read, light cleanup), a flat
+SELECT is enough. No CTEs.
+
+```sql
+SELECT
+    store_id,
+    item_id,
+    wm_yr_wk,
+    sell_price
+FROM {{ source('m5', 'SELL_PRICES') }}
+```
+
+`stg_m5_sell_prices` literally just drops the `loaded_at` audit column.
+Source types are already correct (NUMBER(10,4) for price), naming is
+already snake_case. The file is 9 lines.
+
+`stg_m5_calendar` is slightly more involved — casts `date` (VARCHAR
+in raw) to a real DATE, renames `snap_CA/TX/WI` to lowercase. Still
+flat SELECT pattern, ~20 lines.
+
+### Pattern B — CTE chain (`stg_m5_sales_train`)
+
+Once a model does more than one logical step, the dbt style-guide
+convention is CTEs. Three (or more) named `WITH` blocks, ending in
+`SELECT * FROM <last_cte>`.
+
+```sql
+WITH source AS (
+    SELECT * FROM {{ source('m5', 'SALES_TRAIN') }}
+),
+
+calendar AS (
+    SELECT d, calendar_date FROM {{ ref('stg_m5_calendar') }}
+),
+
+joined AS (
+    SELECT ...
+    FROM source s
+    LEFT JOIN calendar c ON s.d = c.d
+)
+
+SELECT * FROM joined
+```
+
+Three benefits:
+
+- Each CTE has one clear job — reads top-to-bottom like a recipe.
+- Easy to debug — swap `joined` for `source` in the final SELECT to
+  peek at intermediate state without rewriting the model.
+- Easy to extend — adding a new transformation step is just another
+  CTE in the chain.
+
+Note `{{ ref('stg_m5_calendar') }}` (not `source()`) — the calendar is
+another dbt model, not a raw table. dbt uses these `ref()` calls to
+build the model dependency DAG automatically.
+
+---
+
+## Tests — schema YAML and the join-sentinel pattern
+
+Tests live next to their models in `_staging__models.yml` (leading
+underscore sorts the file to the top of the folder). Each column can
+declare `data_tests:` — dbt's built-in `unique` and `not_null` cover
+most needs in staging; relationships and compound-key uniqueness
+arrive with the `dbt_utils` package later.
+
+Eight tests at the end of step 3, fourteen at the end of step 4:
+
+| Model | Column | Tests |
+|---|---|---|
+| `stg_m5_calendar` | `calendar_date` | `unique`, `not_null` |
+| `stg_m5_calendar` | `d` | `unique`, `not_null` |
+| `stg_m5_sell_prices` | `store_id` | `not_null` |
+| `stg_m5_sell_prices` | `item_id` | `not_null` |
+| `stg_m5_sell_prices` | `wm_yr_wk` | `not_null` |
+| `stg_m5_sell_prices` | `sell_price` | `not_null` |
+| `stg_m5_sales_train` | `id` | `not_null` |
+| `stg_m5_sales_train` | `item_id` | `not_null` |
+| `stg_m5_sales_train` | `store_id` | `not_null` |
+| `stg_m5_sales_train` | `d` | `not_null` |
+| `stg_m5_sales_train` | `sale_date` | `not_null` ← join sentinel |
+| `stg_m5_sales_train` | `units_sold` | `not_null` |
+
+`sell_prices` has no single-column uniqueness — its natural key is the
+compound `(store_id, item_id, wm_yr_wk)`. Compound-key uniqueness needs
+`dbt_utils.unique_combination_of_columns`; deferred until that package
+lands.
+
+**The `sale_date NOT NULL` test is the join sentinel.** `stg_m5_sales_train`
+uses LEFT JOIN against the calendar, which produces NULL on any unmatched
+`d`. The test catches the NULL and surfaces it as a failure rather than
+silently dropping the row. Standard defensive pattern — INNER JOIN would
+hide the same problem.
+
+---
+
+## The Snowflake permission boundary — what dbt needs
+
+Phase 2 provisioning gave `RETAIL_ENGINEER` everything to operate inside
+`RETAIL_DB.RAW` but not to create new schemas at the database level.
+First `dbt build` failed with `Insufficient privileges to operate on
+database 'RETAIL_DB'`.
+
+**Fix:** one grant in `sql/snowflake/03_grant_dbt_privileges.sql`:
+
+```sql
+GRANT CREATE SCHEMA ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER;
+```
+
+Snowflake's ownership model handles the rest — when the role creates
+`STAGING`, it becomes the owner, with full privileges inside.
+
+**Diagnostic discipline used:** ran `SHOW GRANTS TO ROLE RETAIL_ENGINEER`
+*before* granting anything, confirmed the gap was a single missing
+privilege, granted exactly that, re-ran `SHOW GRANTS` to verify the new
+row appeared. Avoided the trap of "throw more grants and hope."
+
+Also folded the same grant into `00_provision_account.sql` so a fresh
+setup from this repo gets it from day 1.
+
+---
+
+## End-to-end verification
+
+After step 4, the full pipeline runs end-to-end:
+
+```powershell
+cd dbt
+dbt build --select staging
+```
+
+Output (final block):
+
+```
+Done. PASS=17 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=17
+```
+
+That's 3 view models materialized in `RETAIL_DB.STAGING` plus 14 data
+tests, all green in ~5 seconds (Snowflake handles the 59M-row sales
+× calendar join efficiently). The pipeline is now real end-to-end:
+Azure SQL → Python extract → Snowflake RAW → dbt → Snowflake STAGING.
+
+Eyeball verification of actual rows in Snowsight confirmed the date
+cast, the join (`d_1069` → `2014-01-01`), the SNAP column rename, and
+the `units_sold` rename all worked as designed.
+
+---
+
 ## Sections to add as Phase 4 progresses
 
-- `sources.yml` — declares CALENDAR / SELL_PRICES / SALES_TRAIN as
-  sources, including freshness checks against `loaded_at`.
-- Staging model patterns — file structure, type casting conventions,
-  test placement.
-- Wide-to-long handling (already pre-pivoted by `pandas.melt` in
-  Phase 1; staging just translates `d_NNNN` to real DATEs).
+- Intermediate layer — business-logic joins assembling the
+  sales-with-prices view.
 - Warehouse layer — Kimball star schema, surrogate keys via
   `dbt_utils.generate_surrogate_key`, incremental fact build strategy.
-- dbt tests — `unique`, `not_null`, relationships, custom singular tests.
+- `dbt_utils` package — install + first uses (compound-key uniqueness
+  tests, surrogate keys).
+- Marts layer — one pre-aggregated mart per Power BI page.
 - `dbt build` orchestration through Airflow (Phase 4 closeout).
 
 ---

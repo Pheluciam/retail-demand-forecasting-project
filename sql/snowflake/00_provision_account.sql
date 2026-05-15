@@ -70,7 +70,12 @@ GRANT USAGE   ON WAREHOUSE WH_RETAIL TO ROLE RETAIL_ENGINEER;
 GRANT OPERATE ON WAREHOUSE WH_RETAIL TO ROLE RETAIL_ENGINEER;
 
 -- Database: USAGE = "can see this database in metadata".
-GRANT USAGE ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER;
+-- CREATE SCHEMA = "can create new schemas at the database level".
+-- Required for dbt (Phase 4) to auto-create the STAGING / INTERMEDIATE /
+-- WAREHOUSE / MARTS schemas. Added 2026-05-15 after Phase 4 session 2
+-- caught the gap — see LEARNINGS.md "The grant-fix gap".
+GRANT USAGE         ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER;
+GRANT CREATE SCHEMA ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER;
 
 -- Schema: USAGE = "can see objects in this schema".
 -- CREATE TABLE / VIEW / STAGE / FILE FORMAT = "can build new objects here".

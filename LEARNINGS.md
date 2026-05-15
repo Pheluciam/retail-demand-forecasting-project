@@ -447,6 +447,70 @@ Set folder-level defaults in `dbt_project.yml` (we did), override per-model with
 
 No-side-effects health check — verifies `profiles.yml` resolves, env vars land, the Snowflake adapter can authenticate, and the warehouse is reachable. No models materialize. Key output: `Connection test: [OK connection ok]` + `All checks passed!`. Should be the first dbt command run after any environment change (new venv, new credentials, new shell session). Password is masked in the output even when authentication succeeds — `env_var()` works without leaking secrets to stdout.
 
+**The grant-fix gap — Phase 2 grants didn't cover Phase 4 (2026-05-15, Phase 4 session 2)**
+
+First `dbt build --select staging` failed mid-session with `Insufficient privileges to operate on database 'RETAIL_DB'`. The `RETAIL_ENGINEER` role provisioned in Phase 2 had everything needed to *operate inside* `RETAIL_DB.RAW` (USAGE, CREATE TABLE/VIEW/STAGE inside RAW, full DML on tables) but had never been granted `CREATE SCHEMA` at the database level. dbt's auto-create-the-STAGING-schema attempt bounced off Snowflake's RBAC.
+
+**Root cause.** A clean miss on Criterion 7 of the 10-point audit — Upstream/downstream contract. When the dbt project landed in session 1 it expected to be able to create schemas at the DB level; we never verified the connecting role had the privilege. The Phase 2 audit was clean for Phase 2's needs (load into RAW) and didn't anticipate Phase 4's needs.
+
+**Fix.** New `sql/snowflake/03_grant_dbt_privileges.sql` with one statement: `GRANT CREATE SCHEMA ON DATABASE RETAIL_DB TO ROLE RETAIL_ENGINEER`. Snowflake's ownership model handled the rest — once the role created STAGING, it owned STAGING, which gave it full privileges inside (CREATE VIEW, SELECT, etc.) automatically. No second-round grants needed.
+
+**Diagnostic discipline used.** Before granting anything, ran `SHOW GRANTS TO ROLE RETAIL_ENGINEER` as ACCOUNTADMIN. Confirmed exactly what was present and what was missing. Avoided the trap of "throw more grants at it and hope." After the fix, re-ran `SHOW GRANTS` to confirm the new `CREATE SCHEMA on DATABASE RETAIL_DB` row appeared.
+
+**Carry-forward.** Any time a new tool/layer is introduced (Power BI's connector role in Phase 5, GitHub Actions CI in Phase 6, future MERGE-into-Snowflake patterns), explicitly audit the permission boundary BEFORE the first run. The pattern is: list what the tool will attempt, list what the role currently has, identify the gap, grant once. Cheaper than mid-session firefighting. Also updated `00_provision_account.sql` to include the `CREATE SCHEMA` grant from day 1 — so a future fresh setup from this repo doesn't repeat the gap.
+
+**Snowflake ownership model — the transitive-grants shortcut (2026-05-15)**
+
+When a role creates a schema (or table, view, etc.), Snowflake makes that role the OWNER of the new object. Ownership in Snowflake confers full privileges automatically — no explicit `GRANT SELECT/INSERT/...` needed on the owned object. This is why granting just `CREATE SCHEMA on DATABASE` is sufficient for dbt: the role creates STAGING, becomes its owner, and can create views, run tests, drop+recreate, etc. inside it without further grants.
+
+**Interview line.** "How do you set up Snowflake permissions for dbt?" → "Minimal grants: USAGE on warehouse and database, plus `CREATE SCHEMA` on the database. Once dbt creates each layer's schema as the connecting role, ownership covers the rest. Future grants on other roles (e.g. Power BI read-only) get added when those consumers come online."
+
+**`{{ ref() }}` vs `{{ source() }}` — the dbt reference patterns (2026-05-15)**
+
+Two ways for a model to point at upstream data:
+
+- `{{ source('<source_name>', '<table_name>') }}` — references a table declared in `sources.yml`. Used in staging models pointing at RAW tables.
+- `{{ ref('<model_name>') }}` — references another dbt model in this project. Used everywhere else (intermediate, warehouse, marts), AND inside staging if a staging model joins to another staging model (as `stg_m5_sales_train` does for the date translation).
+
+Both resolve to fully-qualified `DATABASE.SCHEMA.OBJECT` strings at compile time. Crucially, `ref()` also builds the dbt model dependency graph — dbt automatically orders model builds so referenced models build first. Run `dbt run --select stg_m5_sales_train` and dbt knows to build `stg_m5_calendar` first. No manual scheduling needed.
+
+**CTE pattern for staging models (2026-05-15)**
+
+dbt style-guide convention for any model with more than one logical step. Three CTEs: one for each source pull, one (or more) for the actual transformation, then a final `SELECT * FROM <last_cte>`.
+
+Three benefits:
+
+1. Each CTE has one clear job — reads top-to-bottom like a recipe.
+2. Easy to debug — swap `SELECT * FROM joined` for `SELECT * FROM source` to peek at intermediate state without rewriting the model.
+3. Easy to extend — adding a new transformation step is just another CTE in the chain.
+
+Trivial single-SELECT staging models (`stg_m5_sell_prices`) don't need this — the CTE pattern is for models that do real work.
+
+**LEFT JOIN + `not_null` test = the join-sentinel pattern (2026-05-15)**
+
+Defensive data engineering pattern. When joining two tables where every left row SHOULD have a match in the right (e.g. every sale day should map to a calendar entry):
+
+- **INNER JOIN** silently drops left rows without a match. Bad — data quality issue hidden.
+- **LEFT JOIN + `not_null` test** on the joined column. Mismatches produce NULL, which the test catches and surfaces as a failure. Bad data loudly visible.
+
+Standard practice — test as observability. `sale_date NOT NULL` in `stg_m5_sales_train` is exactly this pattern.
+
+**Schema YAML naming `_<folder>__models.yml` (2026-05-15)**
+
+dbt convention for schema/test YAML files in a model folder. Leading underscore sorts the file to the top of the folder alphabetically. Double-underscore visually separates folder name from "models." So `dbt/models/staging/_staging__models.yml` is the canonical name. Used by dbt-labs internally and across most production projects.
+
+**`dbt build` vs `dbt run` vs `dbt test` (2026-05-15)**
+
+- `dbt run` — materializes models only. No tests.
+- `dbt test` — runs tests only. No model rebuilds.
+- `dbt build` — both, dependency-ordered. Builds a model, runs its tests, then proceeds to dependent models only if upstream tests passed. **Default for production work.** Catches data quality regressions before they propagate downstream.
+
+The `--select <selector>` flag scopes the build (`--select staging` for one folder, `--select stg_m5_calendar+` for a model and everything downstream, etc.). Useful for iterating on one layer without rebuilding the whole project.
+
+**dbt 1.11 `freshness` config deprecation (2026-05-15)**
+
+`PropertyMovedToConfigDeprecation` warning surfaced on `dbt parse` of the first `sources.yml`. dbt 1.8+ moved `freshness` and `loaded_at_field` from top-level under a source to inside a `config:` block under the source. Same semantics, different nesting. Fix is small: add a `config:` key and indent everything that was at source-level by 2 spaces. Worth knowing because dbt-labs is moving toward this nested-config pattern across the board — model configs, source configs, test configs.
+
 ### Power BI (advanced from Project #1)
 
 _(to be populated during Phase 5 — explicit DAX measures, cross-page slicers,
