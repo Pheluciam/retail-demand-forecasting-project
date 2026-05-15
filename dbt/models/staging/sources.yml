@@ -1,0 +1,97 @@
+# =============================================================================
+# sources.yml — M5 retail dataset
+# =============================================================================
+# Declares the three RAW tables as dbt sources. Staging models reference
+# them via {{ source('m5', 'TABLE_NAME') }}. Freshness thresholds check
+# the LOADED_AT audit column on each table.
+# =============================================================================
+
+version: 2
+
+sources:
+  - name: m5
+    description: "M5 Forecasting dataset — Walmart daily sales 2011-2016, landed into Snowflake RAW by Airflow."
+    database: RETAIL_DB
+    schema: RAW
+
+    # Inherited by every table below. Override per-table if needed.
+    config:
+      loaded_at_field: LOADED_AT
+      freshness:
+        warn_after:  { count: 36, period: hour }
+        error_after: { count: 72, period: hour }
+
+    tables:
+
+      # ----------------------------------------------------------------
+      - name: CALENDAR
+        description: "Calendar dimension — 1 row per date with fiscal week, weekday, events, SNAP flags."
+        columns:
+          - name: date
+            description: "YYYY-MM-DD as text. Cast to DATE in staging."
+          - name: wm_yr_wk
+            description: "Walmart fiscal year+week, e.g. 11101. Joins to SELL_PRICES."
+          - name: weekday
+            description: "'Saturday', 'Sunday', etc."
+          - name: wday
+            description: "1-7 weekday number."
+          - name: month
+            description: "1-12."
+          - name: year
+            description: "e.g. 2016."
+          - name: d
+            description: "'d_1' to 'd_1941'. Join key to SALES_TRAIN.d. Translated to real DATE in staging."
+          - name: event_name_1
+            description: "First event for this date, nullable. e.g. 'SuperBowl'."
+          - name: event_type_1
+            description: "First event type — Sporting / Cultural / National / Religious."
+          - name: event_name_2
+            description: "Second event for this date (rare)."
+          - name: event_type_2
+            description: "Second event type."
+          - name: snap_CA
+            description: "SNAP benefits day flag (0/1) — California."
+          - name: snap_TX
+            description: "SNAP benefits day flag (0/1) — Texas."
+          - name: snap_WI
+            description: "SNAP benefits day flag (0/1) — Wisconsin."
+          - name: loaded_at
+            description: "Audit timestamp — when this row was inserted by the extract job."
+
+      # ----------------------------------------------------------------
+      - name: SELL_PRICES
+        description: "Weekly sell prices — 1 row per store × item × fiscal week."
+        columns:
+          - name: store_id
+            description: "Store identifier, e.g. 'CA_1', 'TX_3'."
+          - name: item_id
+            description: "Item identifier, e.g. 'HOBBIES_1_001'."
+          - name: wm_yr_wk
+            description: "Walmart fiscal year+week. Joins to CALENDAR.wm_yr_wk."
+          - name: sell_price
+            description: "Retail price (USD). NUMBER type for exact arithmetic."
+          - name: loaded_at
+            description: "Audit timestamp."
+
+      # ----------------------------------------------------------------
+      - name: SALES_TRAIN
+        description: "Daily unit sales — 1 row per item × store × day. Long format (pandas.melt in Phase 1)."
+        columns:
+          - name: id
+            description: "M5 series id, e.g. 'HOBBIES_1_001_CA_1_evaluation'."
+          - name: item_id
+            description: "Item identifier."
+          - name: dept_id
+            description: "Department, e.g. 'HOBBIES_1'."
+          - name: cat_id
+            description: "Category, e.g. 'HOBBIES'."
+          - name: store_id
+            description: "Store identifier."
+          - name: state_id
+            description: "State — 'CA', 'TX', 'WI'."
+          - name: d
+            description: "'d_1' to 'd_1941'. Join key to CALENDAR.d. Translated to real DATE in stg_m5_sales_train."
+          - name: sales
+            description: "Units sold for that item/store/day."
+          - name: loaded_at
+            description: "Audit timestamp."
