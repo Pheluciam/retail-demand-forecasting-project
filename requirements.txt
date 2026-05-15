@@ -32,3 +32,12 @@ sqlalchemy>=2.0.0
 # which bulk-loads a DataFrame via internal stage + COPY INTO (much faster
 # than row-by-row INSERTs — the recommended bulk-load path).
 snowflake-connector-python[pandas]>=3.0.0
+
+# -----------------------------------------------------------------------------
+# Phase 4 — dbt transformations
+# -----------------------------------------------------------------------------
+
+# dbt Snowflake adapter — pulls in dbt-core as a transitive dependency, so
+# one install lands both the templating engine and the Snowflake driver.
+# Provides the `dbt` CLI: dbt run / dbt build / dbt test / dbt docs.
+dbt-snowflake>=1.11.0

@@ -2,7 +2,7 @@
 
 > A production-grade retail demand-planning analytics platform built on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 Forecasting) is ingested from Azure SQL Database into Snowflake via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
-**Status:** 🚧 In development — Phase 3 in flight (Airflow orchestration live: first DAG runs end-to-end with `extract_one_day` → `verify_one_day` task chain, verifying row counts independently in Snowflake on every run). Phases 0–2 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min). Phase 4 (dbt transformations) next.
+**Status:** 🚧 In development — Phase 4 in flight (dbt transformations starting): dbt project scaffolded with `dbt-snowflake`, `profiles.yml` using `env_var()` for production-grade secrets handling, Snowflake connection verified end-to-end with `dbt debug`. Phases 0–3 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min), Airflow orchestration live with `extract_one_day` → `verify_one_day` task chain catching silent failures inside the DAG. Staging layer + Kimball star schema next.
 
 ---
 
@@ -72,6 +72,8 @@ The M5 dataset (~58M rows of daily sales across 30,000 SKUs and 10 stores) is la
 
 - **`PROJECT_PLAN.md`** — full plan, scope, timeline, locked decisions, risks
 - **`PROJECT_CONTEXT.md`** — current state and immediate next steps
+- **`EXTRACT_PIPELINE.md`** — Phase 2 walkthrough: Azure SQL → Snowflake extract path, design decisions, throughput economics
+- **`DBT_PIPELINE.md`** — Phase 4 walkthrough: dbt project layout, `dbt_project.yml` / `profiles.yml` line-by-line, materialization strategy per layer
 - **`CODE_QUALITY.md`** — the 10-point code-quality checklist (7 core checks + 3 failsafes) applied to every non-trivial script in this repo, with concrete examples from the codebase
 - **`LEARNINGS.md`** — running journal of lessons learned across the project
 - **`TEACHING_PREFERENCES.md`** — working-style preferences (relevant to AI-assisted development workflow)

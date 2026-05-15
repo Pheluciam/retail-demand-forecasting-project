@@ -1,0 +1,21 @@
+# =============================================================================
+# profiles.yml — Snowflake connection
+# =============================================================================
+# See DBT_PIPELINE.md at project root for the full walkthrough. Secrets
+# are read from .env at run time via env_var() — file is safe to commit.
+# =============================================================================
+
+retail_demand_forecasting:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA') }}"
+      threads: 4
+      client_session_keep_alive: false

@@ -11,7 +11,8 @@
 secrets/
 credentials/
 config.local.*
-profiles.yml          # dbt connection profiles — contain credentials
+profiles.yml          # dbt connection profiles — usually contain credentials
+!dbt/profiles.yml     # …but ours uses env_var() so secrets stay in .env — safe to commit
 kaggle.json           # Kaggle API token
 
 # Azure / Snowflake / cloud credentials

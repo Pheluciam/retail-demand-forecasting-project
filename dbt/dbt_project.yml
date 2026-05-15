@@ -1,0 +1,40 @@
+# =============================================================================
+# dbt_project.yml — Retail Demand & Forecasting
+# =============================================================================
+# Master config for the dbt project. See DBT_PIPELINE.md at project root for
+# the full walkthrough of how this connects to Snowflake and what each layer
+# does in the transformation pipeline.
+# =============================================================================
+
+name: "retail_demand_forecasting"
+version: "1.0.0"
+config-version: 2
+
+profile: "retail_demand_forecasting"
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Folder-level materialization defaults. Individual models override with
+# `{{ config(materialized='...') }}` at the top of the SQL file.
+models:
+  retail_demand_forecasting:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    # fact_* models override to `incremental` individually.
+    warehouse:
+      +materialized: table
+    # Power BI queries marts — must be fast.
+    marts:
+      +materialized: table

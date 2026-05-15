@@ -360,8 +360,92 @@ Our `docker-compose.yml` **already uses the new name** (`AIRFLOW__DATABASE__SQL_
 
 ### dbt (advanced from Project #1)
 
-_(to be populated during Phase 4 — incremental models, partitioning, dbt_utils,
-tests, marts layering)_
+**Installing dbt-snowflake alongside the Phase 3 `--no-deps` Airflow stub (2026-05-15, Phase 4 session 1)**
+
+First `pip install dbt-snowflake` printed a wall of "apache-airflow 2.10.3 requires X, which is not installed" warnings plus one "sqlalchemy 2.0.49 is incompatible" line. **All harmless** — direct consequence of Phase 3 session 1's deliberate `pip install pendulum "apache-airflow==2.10.3" --no-deps` (logged in Phase 3 LEARNINGS). The local-venv Airflow package was always a half-install for Pylance import-resolution purposes; the actual Airflow runtime lives inside Docker. dbt needs SQLAlchemy 2.x, the Airflow stub wants 1.4.x — they coexist because only dbt is ever actually *run* from this venv. The line that mattered: `Successfully installed dbt-core-1.11.10 dbt-snowflake-1.11.5`.
+
+**Carry-forward.** Textbook "multiple tools in one venv" drift. The professional long-term fix is per-tool venvs or VS Code Dev Containers — already flagged as Phase 6 polish.
+
+**Three-layer documentation pattern for code-shaped files (2026-05-15, Phase 4 session 1)**
+
+Locked in mid-session after Phil pushed back on heavily-commented YAML being unsuitable for a portfolio repo. Now `TEACHING_PREFERENCES.md` policy for every code-shaped file going forward:
+
+- **(a) Verbose, comment-rich version shown in chat** — comments-above-the-line style, every line explained. Phil's learning artefact for the session.
+- **(b) Clean, professional version written to disk** — short header pointing at the walkthrough doc, only non-obvious-choice inline comments. What ships to git.
+- **(c) Companion walkthrough markdown** at project root — `<COMPONENT>_PIPELINE.md` pattern, matches `EXTRACT_PIPELINE.md` from Phase 2. Lives in the repo, carries the depth.
+
+**Why this matters.** A portfolio visitor skimming a heavily-commented `dbt_project.yml` reads "junior dev copy-pasted a tutorial." Clean config + separate depth doc reads "senior engineer who documented their work." Same content, different signal. Created `DBT_PIPELINE.md` this session as the first instance of (c).
+
+**Comments-above-the-line, never end-of-line (2026-05-15, Phase 4 session 1)**
+
+Same `TEACHING_PREFERENCES.md` update. End-of-line comments push lines past the Claude chat code-block width, forcing horizontal scroll which breaks reading flow. Comments-above-the-line keeps every line short, reads top-to-bottom naturally, and the file itself becomes the teaching artefact that lives in the repo forever (not just in chat scrollback). Discovered when the first verbose `dbt_project.yml` had ~120-char lines.
+
+**dbt_project.yml vs profiles.yml — the two-file split (2026-05-15)**
+
+dbt deliberately separates two concerns:
+
+- **`dbt_project.yml`** says *what* to do — project name, folder layout, default materializations.
+- **`profiles.yml`** says *where* to connect — Snowflake account, credentials, warehouse, database.
+
+The bridge is the `profile:` line in `dbt_project.yml`, which looks up a matching top-level key in `profiles.yml`. One `profiles.yml` can hold multiple project profiles, each with multiple targets (`dev`, `prod`, etc.) — `dbt run --target prod` switches.
+
+**Carry-forward.** In a team setting, every engineer has their own `profiles.yml` pointing at their personal dev schema. `dbt_project.yml` is shared and identical across the team. Don't conflate them.
+
+**`env_var()` — dbt's secrets pattern (2026-05-15)**
+
+```yaml
+password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+```
+
+Jinja template. At dbt-run time, the value resolves by reading the shell environment. dbt does **not** auto-read `.env` — values must already be in the OS environment when dbt starts. Result: `profiles.yml` is safe to commit (no plaintext secrets), credentials sit in `.env` (gitignored), rotation is a `.env` edit. Same pattern real teams use with HashiCorp Vault / AWS Secrets Manager — swap the secret source, dbt-side wiring is unchanged. Direct transfer to interviews: "How do you handle secrets in dbt?" → "env_var() resolving against environment populated from Vault."
+
+**PowerShell one-liner to load `.env` before running dbt (2026-05-15)**
+
+```powershell
+Get-Content .env | ForEach-Object {
+    if ($_ -match '^([A-Z_][A-Z0-9_]*)=(.*)$') {
+        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+    }
+}
+```
+
+Run once per PowerShell session. Walks `.env` line-by-line, pulls out `KEY=VALUE` pairs (the regex skips comments and blank lines), sets each as a process-scoped env var. Subsequent `dbt` commands see them. Documented in `DBT_PIPELINE.md` as the prerequisite step.
+
+**`.gitignore` un-ignore syntax (`!path`) (2026-05-15)**
+
+Phase 0's `.gitignore` had a blanket `profiles.yml` ignore — the dbt-community default, because most teams write secrets directly into the file. We don't (we use `env_var()`), so our `profiles.yml` is safe to commit. Override syntax:
+
+```
+profiles.yml
+!dbt/profiles.yml
+```
+
+A line starting with `!` un-ignores a specific path that would otherwise match a previous pattern. **Order matters** — the un-ignore must come *after* the ignore. Git evaluates `.gitignore` rules top-to-bottom, with later rules overriding earlier ones.
+
+**Schema concatenation gotcha — dbt's default `generate_schema_name` (2026-05-15)**
+
+dbt's default behaviour with the `+schema:` per-folder config in `dbt_project.yml` is to **concatenate** the target schema (from `profiles.yml`) with the per-folder schema. So `profiles.yml` `schema: DEV` + `+schema: staging` lands the model in `DEV_STAGING` — not the cleaner `STAGING`.
+
+**Fix (deferred to Phase 4 session 2).** Custom `macros/generate_schema_name.sql` that overrides this — if a per-folder `+schema:` is set, use it directly without concatenating. Standard pattern in production dbt projects, deferred to before the first `dbt run` materializes anything.
+
+For step 3d we used the existing `SNOWFLAKE_SCHEMA=RAW` env var as a placeholder — `dbt debug` doesn't materialize anything, so no harm done. Must be replaced before staging models land.
+
+**materialized: view / table / incremental / ephemeral (2026-05-15)**
+
+The dbt config that decides what *kind* of physical object each model becomes in Snowflake. Same SELECT, different storage strategy:
+
+- **`view`** — `CREATE OR REPLACE VIEW`. Always fresh, no storage cost. Staging + intermediate default.
+- **`table`** — `CREATE OR REPLACE TABLE`. Fast to query, slightly stale until next run. Dim tables, marts.
+- **`incremental`** — `CREATE TABLE` once, then `INSERT`/`MERGE` only new rows on subsequent runs. Fact tables at scale.
+- **`ephemeral`** — no warehouse object; dbt inlines as a CTE in downstream models. Tiny helpers only.
+
+Set folder-level defaults in `dbt_project.yml` (we did), override per-model with `{{ config(materialized='...') }}`.
+
+**Kitchen analogy that landed in session.** view = made-to-order (re-cooked every order, always fresh). table = pre-cooked buffet tray (fast to serve, stale until refreshed). incremental = topped-up buffet (existing food stays, new dishes get added). ephemeral = sauce base in the prep kitchen (never served on its own, only folded into other dishes).
+
+**`dbt debug` as the connection canary (2026-05-15)**
+
+No-side-effects health check — verifies `profiles.yml` resolves, env vars land, the Snowflake adapter can authenticate, and the warehouse is reachable. No models materialize. Key output: `Connection test: [OK connection ok]` + `All checks passed!`. Should be the first dbt command run after any environment change (new venv, new credentials, new shell session). Password is masked in the output even when authentication succeeds — `env_var()` works without leaking secrets to stdout.
 
 ### Power BI (advanced from Project #1)
 

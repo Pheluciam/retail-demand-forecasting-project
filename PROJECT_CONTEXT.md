@@ -2,13 +2,48 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-15 (Phase 3 session 2 closed — verify_one_day task shipped, UI trigger form enabled).
+> Last updated: 2026-05-15 (Phase 4 session 1 closed — dbt project scaffolded, Snowflake connection verified end-to-end).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 3 — sessions 1 + 2 ✅ DONE. Next session opens **Phase 4 session 1 (dbt transformations)**. Remaining Phase 3 stretch items (VS Code Dev Containers) deferred to Phase 6 polish per the original plan.
+**Current phase:** Phase 3 ✅ DONE. **Phase 4 session 1 ✅ DONE** — dbt project scaffolded, `profiles.yml` with `env_var()` shipped, `dbt debug` green against `RETAIL_DB.RAW` via `WH_RETAIL`. Next session opens **Phase 4 session 2** — wire up per-layer schema separation (the `generate_schema_name` macro + `+schema:` per folder), then `sources.yml` for the three RAW tables, then first staging models. Remaining Phase 3 stretch items (VS Code Dev Containers) still deferred to Phase 6.
+
+**Last action (2026-05-15 — Phase 4 session 1):** Scaffolded the dbt project from scratch using hand-scaffold (not `dbt init`) — every file authored deliberately. `dbt-snowflake 1.11.5` installed into existing `.venv` alongside the Phase 3 Airflow stub; pip surfaced the expected "multiple tools in one venv" warnings — all harmless, no dbt-side impact (see LEARNINGS). Wrote `dbt/dbt_project.yml` and `dbt/profiles.yml` (clean professional versions, walkthrough lives in new `DBT_PIPELINE.md`). `.gitignore` line 14 had a blanket `profiles.yml` ignore — added a `!dbt/profiles.yml` exception because our profile uses `env_var()` and is safe to commit. `dbt debug` passes end-to-end. **Mid-session pacing & teaching-format refinements** captured in `TEACHING_PREFERENCES.md`: (a) comments-above-the-line for inline code explanations (never end-of-line — horizontal scroll breaks reading flow); (b) three-layer pattern for every code-shaped file going forward — verbose-version-in-chat, clean-version-on-disk, walkthrough-doc-alongside.
+
+**Files added this session (Phase 4 session 1):**
+
+- `dbt/dbt_project.yml` — master dbt config. Project name `retail_demand_forecasting`, profile pointer, model folder layout, materialization defaults per layer (staging=view, intermediate=view, warehouse=table, marts=table). Clean professional version (~35 lines); depth lives in `DBT_PIPELINE.md`.
+- `dbt/profiles.yml` — Snowflake connection details. Every credential via `env_var()` — file is safe to commit. One target (`dev`); production team would add `prod`.
+- `dbt/models/staging/.gitkeep`, `dbt/models/intermediate/.gitkeep`, `dbt/models/warehouse/.gitkeep`, `dbt/models/marts/.gitkeep` — empty placeholder files so Git tracks the model folder skeleton ahead of actual models landing.
+- `DBT_PIPELINE.md` — new walkthrough doc at project root, matches the `EXTRACT_PIPELINE.md` pattern from Phase 2. Covers the dbt big picture, five-layer architecture, project layout, line-by-line walkthrough of `dbt_project.yml`, full `profiles.yml` walkthrough including the PowerShell `.env` loader, schema-separation TODO, and `dbt debug` verification. Will be extended as Phase 4 progresses.
+
+**Files updated this session (Phase 4 session 1):**
+
+- `requirements.txt` — added Phase 4 section with `dbt-snowflake>=1.11.0` (minimum-version pin only at this stage; lockfile generated end of Phase 4). dbt-core pulled in as transitive dependency.
+- `.gitignore` — line 14 split into two lines: kept the blanket `profiles.yml` ignore, added `!dbt/profiles.yml` un-ignore exception immediately below. Standard Git pattern; order matters (un-ignore must follow the ignore).
+- `TEACHING_PREFERENCES.md` — added two new sub-bullets under the existing "Show actual code changes inline" rule: (a) **comments-above-the-line, never end-of-line** — applies to YAML, JSON, Dockerfile, any config file Claude walks through with line-by-line annotations. End-of-line comments push past chat code-block width and force horizontal scroll. (b) **three-layer pattern for code-shaped files** — verbose-in-chat (Phil's learning artefact) + clean-on-disk (what ships to git) + walkthrough-md-alongside (portfolio-depth doc).
+- `LEARNINGS.md` — populated the dbt section with 10 substantive entries (install drift with Airflow stub, three-layer doc pattern, comments-above-line, the two-file dbt_project.yml/profiles.yml split, env_var(), PowerShell .env loader, .gitignore un-ignore syntax, schema-concatenation gotcha, materialized options + kitchen analogy, `dbt debug` as the canary).
+- `PROJECT_CONTEXT.md` — this file, session 1 closeout.
+
+**Headline outcomes from this session:**
+
+- **dbt-Snowflake connection verified end-to-end.** `dbt debug` returns `Connection test: [OK connection ok]` and `All checks passed!`. Every env-driven credential (account, user, password, role, warehouse, database) resolves through `env_var()` from `.env`. Password correctly masked in stdout — secrets pattern works as designed.
+- **Hand-scaffold instead of `dbt init`.** Deliberate choice — no example boilerplate to delete, `profiles.yml` lives *in* the repo (portfolio-readable) rather than in `~/.dbt/` (invisible to anyone cloning the repo). Same starting state a senior engineer would produce when bootstrapping a greenfield dbt project at a real company.
+- **Three-layer documentation pattern locked in for the rest of the project.** Every code-shaped file from here on follows verbose-in-chat / clean-on-disk / walkthrough-md-alongside. `DBT_PIPELINE.md` is the first instance and will be extended as Phase 4 progresses.
+- **TEACHING_PREFERENCES.md evolved twice mid-session.** Phil pushed back on (a) heavily-commented YAML being unsuitable for a portfolio and (b) end-of-line comments forcing horizontal scroll in chat. Both refinements captured as durable rules — applies across all future code-shaped work in Project 2 and any Project 3.
+- **Schema-separation TODO open.** `profiles.yml` currently has `schema: RAW` via the env var as a placeholder. `dbt debug` is safe with this (no materialization), but before any `dbt run` lands a real model we need a custom `generate_schema_name.sql` macro plus `+schema:` per folder so staging/intermediate/warehouse/marts go to their own schemas (not `RAW_STAGING` etc). First step of Phase 4 session 2.
+
+**Next session (Phase 4 session 2):**
+
+1. Per-layer schema separation — `macros/generate_schema_name.sql` + `+schema:` per folder in `dbt_project.yml`. **Must happen before any `dbt run`.**
+2. `sources.yml` declaring CALENDAR / SELL_PRICES / SALES_TRAIN as the M5 source. Column documentation + freshness checks against `loaded_at`. Verify with `dbt source freshness`.
+3. First two staging models — `stg_m5_calendar` and `stg_m5_sell_prices`. Lower complexity — type casting, renaming, no shape change. Adds first dbt tests (`unique`, `not_null` on PK columns).
+4. `stg_m5_sales_train` — the substantive staging model. RAW is already long (pandas.melt during Phase 1 load); staging joins to `stg_m5_calendar` to translate `d_NNNN` strings to real DATEs. This `sale_date` is what `fact_daily_sales` will eventually cluster on.
+5. `dbt build`, verify all green, 10-point code-quality audit, doc updates + commit.
+
+---
 
 **Last action (2026-05-15 — Phase 3 session 2):** Added `verify_one_day` task downstream of `extract_one_day` in `m5_daily_extract`. Three independent Snowflake-side checks (CALENDAR = 1 row, SELL_PRICES > 0, SALES_TRAIN > 0) batched into one SQL round-trip. **Caught a real silent failure within 10 minutes of deployment** — today's `2026-05-15` auto-fire (no M5 data for that date) returned 0 rows from extract without error; verify queried Snowflake, found 0 rows on all three checks, raised RuntimeError, task square went red. Pipeline correctly reported "the data did not actually land." UI trigger form enabled via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true`; 20-minute UI gotcha around play-arrow vs `w/ config` buttons documented in LEARNINGS. Test trigger for `2014-01-04` via UI form: extract + verify both green end-to-end.
 
@@ -216,17 +251,59 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 
 **Phase 3 closed.** Both technical sessions done; remaining stretch items (Dev Containers) rolled into Phase 6 polish per the original plan. **Phase 4 (dbt transformations) opens the next session.**
 
-### Quick start for Phase 4 session 1
+---
+
+## Phase 4 progress
+
+**Phase 4 = dbt transformations.** Estimated 3–4 sessions. Session 1 done.
+
+### Session 1 (2026-05-15 — ✅ DONE)
+
+1. ✅ `dbt-snowflake 1.11.5` installed into existing `.venv` via `pip install dbt-snowflake`. Resolved alongside Phase 3's `--no-deps` Airflow stub — surfaced expected "multiple tools in one venv" pip warnings; all harmless. Full diagnosis in LEARNINGS.
+2. ✅ Hand-scaffolded dbt project structure (chose this over `dbt init` for portfolio cleanliness — no example boilerplate to delete, `profiles.yml` lives *in* the repo where it's visible to anyone cloning).
+3. ✅ Wrote `dbt/dbt_project.yml` — project name `retail_demand_forecasting`, materialization defaults per layer (staging=view, intermediate=view, warehouse=table, marts=table). Clean professional version (~35 lines); depth lives in new `DBT_PIPELINE.md`.
+4. ✅ Wrote `dbt/profiles.yml` — every credential via `env_var()`. File is safe to commit. `.gitignore` updated with `!dbt/profiles.yml` exception (line 14-15) to override the dbt-community-default blanket ignore on `profiles.yml`.
+5. ✅ Empty model folders + `.gitkeep` placeholders: `models/staging/`, `models/intermediate/`, `models/warehouse/`, `models/marts/`.
+6. ✅ `requirements.txt` updated with `dbt-snowflake>=1.11.0` under a new Phase 4 section (minimum-version pin; lockfile generation deferred to end of Phase 4).
+7. ✅ `dbt debug` passes end-to-end against `RETAIL_DB.RAW` via `WH_RETAIL`. Every env-driven credential (account, user, password, role, warehouse, database) resolves correctly. Password masked in stdout — secrets pattern works as designed.
+8. ✅ Two mid-session `TEACHING_PREFERENCES.md` refinements after Phil pushed back on verbosity: (a) **comments-above-the-line** for inline code explanations (never end-of-line — horizontal scroll in chat breaks reading flow); (b) **three-layer pattern** for every code-shaped file going forward — verbose-in-chat + clean-on-disk + walkthrough-md-alongside.
+9. ✅ `DBT_PIPELINE.md` created as the first instance of the three-layer pattern (matches Phase 2's `EXTRACT_PIPELINE.md`). Covers dbt big picture, five-layer architecture, project layout, line-by-line walkthroughs of `dbt_project.yml` and `profiles.yml`, the `.env` loading prerequisite, and `dbt debug` verification. Will be extended each session.
+10. ✅ `LEARNINGS.md` dbt section populated with 10 substantive entries.
+
+### Quick start for Phase 4 session 2
 
 ```powershell
+# 1. Move into the project + activate venv
 cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 .\.venv\Scripts\Activate.ps1
-# Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
-# Airflow stack does not need to be running for Phase 4 work -- dbt builds
-# happen against Snowflake directly. Boot only if you want to run a DAG.
-# First Phase 4 step (likely): initialise dbt project structure, configure
-# profiles.yml with our Snowflake creds, source the existing RAW tables.
+
+# 2. Re-anchor Claude on (in order):
+#    PROJECT_CONTEXT.md  → TEACHING_PREFERENCES.md
+#    LEARNINGS.md        → PROJECT_PLAN.md
+#    DBT_PIPELINE.md     ← new this phase, the dbt walkthrough
+
+# 3. Load .env into the PowerShell session — REQUIRED before any dbt command
+Get-Content .env | ForEach-Object {
+    if ($_ -match '^([A-Z_][A-Z0-9_]*)=(.*)$') {
+        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+    }
+}
+
+# 4. Sanity-check dbt is still healthy
+cd dbt
+dbt debug   # expect: All checks passed!
 ```
+
+**First Phase 4 session 2 step:** wire up per-layer schema separation
+(custom `macros/generate_schema_name.sql` + `+schema:` per folder in
+`dbt_project.yml`) — **must happen before any `dbt run`**. Then
+`sources.yml` for the three RAW tables (CALENDAR, SELL_PRICES,
+SALES_TRAIN) with `loaded_at` freshness checks. Verify with
+`dbt source freshness`. Then first staging models.
+
+Airflow stack does **not** need to be running for Phase 4 work — dbt
+talks to Snowflake directly. Boot Docker only if you want to demo
+a DAG run.
 
 ---
 
@@ -236,6 +313,9 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 - `TEACHING_PREFERENCES.md` — how Phil works with Claude (carry-forward from Project #1, plus SQL CAPS preference and Project 2 pacing notes)
 - `LEARNINGS.md` — running journal of lessons learned (populated as we go)
 - `LEARNING_ROADMAP.md` — forward-looking learning pathway beyond Project #2 (incl. planned post-Project-#3 six-week Python deep dive)
+- `EXTRACT_PIPELINE.md` — Phase 2 walkthrough for the Azure SQL → Snowflake extract path (interview-ready)
+- `DBT_PIPELINE.md` — Phase 4 walkthrough for the dbt transformation pipeline (interview-ready, extended each session)
+- `CODE_QUALITY.md` — the 10-point code-quality audit checklist applied to every non-trivial script
 - `README.md` — public-facing project intro for hiring managers (built up over Phase 6)
 - `.gitignore` — files Git should ignore (secrets, data, build artefacts)
 
