@@ -30,11 +30,15 @@ models:
   retail_demand_forecasting:
     staging:
       +materialized: view
+      +schema: STAGING
     intermediate:
       +materialized: view
+      +schema: INTERMEDIATE
     # fact_* models override to `incremental` individually.
     warehouse:
       +materialized: table
+      +schema: WAREHOUSE
     # Power BI queries marts — must be fast.
     marts:
       +materialized: table
+      +schema: MARTS
