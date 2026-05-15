@@ -315,6 +315,49 @@ ORDER BY e.check_name;
 
 **Carry-forward.** Any verification SQL file with two or more checks in future projects ends with a Section N rollup using this template. Cheap insurance; cost is ~30 lines of well-structured SQL per file. Detailed sections (1, 2, 3, ...) stay for debugging when a FAIL appears; the rollup is the headline.
 
+**`verify_one_day` caught a real silent failure on first deploy (2026-05-15, Phase 3 session 2)**
+
+Built `verify_one_day` as a second task in `m5_daily_extract`, downstream of `extract_one_day`. Three Snowflake-side checks (`CALENDAR` = exactly 1 row for run_date, `SELL_PRICES` > 0 rows for the fiscal week containing run_date, `SALES_TRAIN` > 0 rows for the M5 d-code mapping to run_date) batched into a single SQL round-trip with three positional `%s` binds. Doesn't read the extract task's return value or XCom — queries Snowflake fresh. Same philosophy as the files in `sql/verify/`, but the loop closes inside Airflow rather than relying on a manual Snowsight pass.
+
+**The verify task caught a real silent failure within ten minutes of deployment.** While testing the manual `2014-01-03` trigger, the run stuck in `queued` forever. Diagnosis: **paused DAGs don't execute manually-triggered tasks in Airflow 2.x** — the trigger creates the DAG run successfully but the scheduler refuses to process tasks. Unpaused the DAG to clear it. The unpause then auto-fired today's `2026-05-15` slot because `catchup=False` only suppresses *historical backfill*, not the "next scheduled interval." Today's slot extracted data for a date M5 doesn't cover — Azure SQL returned 0 rows, `extract_one_day` finished cleanly with no error, and `verify_one_day` then asked Snowflake "got 1 calendar row for 2026-05-15?", got `0`, raised `RuntimeError`, square went red. **Exactly the silent-failure shape the verify task was designed to catch.**
+
+**Lessons.**
+
+- **Independent verification beats trusting return codes.** If verify had read the extract task's XCom (`rows_written = 0`), the chain would have been "extract reported zero, verify confirms zero, all good." Querying Snowflake fresh closed that loop properly. A verify that depends on the extract's word is a verify with the same blind spots as the extract.
+- **Silent failures are the dangerous failures.** A loud crash gets fixed within hours. A quiet zero-row extract that reports success can poison downstream dashboards, alerts, and dbt models for months before anyone notices the numbers stopped moving.
+- **`catchup=False` is not the same as "no auto-runs."** It only suppresses backfill of skipped historical intervals. The first scheduled interval *after* unpause still fires. To suppress that too, separate config (e.g., `is_paused_upon_creation=True` on initial deploy, or just leaving the DAG paused) is needed.
+- **Paused DAGs swallow manual triggers in Airflow 2.x.** The DAG run is created and queued, but tasks won't be scheduled. Operator confusion in the moment: "I triggered it but nothing's running." Resolution: unpause, let the run complete, re-pause after if metadata-DB clutter is the concern.
+
+**Carry-forward.** Every DAG with a real-world data destination in future projects gets an independent verify task as part of its definition-of-done. The pattern is cheap — ~50 lines of Python plus a single SQL round-trip — and the value compounds because the alternative (trusting upstream return codes) fails silently exactly when it matters most.
+
+Reference screenshots: `docs/screenshots/00_verify_caught_silent_failure_2026-05-15_log.png` (the Logs tab showing the three CALENDAR / SELL_PRICES / SALES_TRAIN count lines plus the `RuntimeError` message). Grid-view side-by-side screenshot deferred — can be regenerated from `m5_daily_extract` history at any time.
+
+**`SHOW_TRIGGER_FORM_IF_NO_PARAMS=true` + the two-button UI gotcha (2026-05-15, Phase 3 session 2)**
+
+Enabled the trigger-with-config form by adding `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'` to the shared `x-airflow-common.environment` block in `airflow/docker-compose.yml`, then full `down` + `up -d` (an env-var change is only picked up at container start). Verified the var landed two ways: `docker compose exec airflow-webserver env | findstr -i trigger` returned the variable, and `docker compose exec airflow-webserver airflow config get-value webserver show_trigger_form_if_no_params` returned `true` — confirming Airflow's own config system sees the setting, not just the OS env layer.
+
+**UI gotcha that ate ~20 minutes.** Even with the flag correctly enabled, clicking the play-arrow "Trigger DAG" button on the DAG detail page still fired the run immediately with no form. Eventually figured out: Airflow 2.10's DAG detail page exposes **two distinct trigger buttons**. The play-arrow "Trigger DAG" always quick-fires (uses the current timestamp as logical_date). The dropdown-revealed **"Trigger DAG w/ config"** is the one that opens the modal with the calendar-icon Logical Date field + Configuration JSON area. The flag controls whether the form *exists* for no-param DAGs at all (it's hidden by default since 2.7) — it does not change which button calls it. Validated end-to-end by triggering for `2014-01-04T00:00:00+00:00` via the form; extract + verify both ran green.
+
+**Lessons.**
+
+- **Flags that change UI behaviour need TWO validations:** the env-var diagnostic (`env | grep`), *and* the actual user-facing click path. Either alone can mislead.
+- **`airflow config get-value` is a better diagnostic than reading the env var.** It confirms Airflow's *config system* has resolved the setting, not just that the OS-level env var is present. Catches edge cases where the var landed but Airflow's section/key mapping is wrong.
+- **In Airflow 2.10's UI, "Trigger DAG" and "Trigger DAG w/ config" are not the same control.** The first is always immediate; the second is always form-based. Browser cache and incognito mode are red herrings here.
+
+Reference screenshot: `docs/screenshots/01_ui_trigger_form_with_date_picker.png` — the filled-in form showing Logical Date `2014-01-04T00:00:00+00:00`, Run id empty, Configuration JSON `{}`, ready to click Trigger.
+
+**Harmless deprecation warning: `core/sql_alchemy_conn` (2026-05-15)**
+
+Every Airflow CLI invocation inside the container prints:
+
+```
+FutureWarning: section/key [core/sql_alchemy_conn] has been deprecated, you should use [database/sql_alchemy_conn] instead. Please update your `conf.get*` call to use the new name
+```
+
+Our `docker-compose.yml` **already uses the new name** (`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`, line 44). The warning is emitted by Airflow's own internal compatibility shim that still reads the legacy `core/sql_alchemy_conn` section path somewhere inside `airflow.configuration`. Functional impact: zero. Audit trail: confirmed by grepping `docker-compose.yml` and `Dockerfile`, neither contains the old name.
+
+**Carry-forward.** Leave it alone. The warning will disappear when we upgrade to Airflow 3.x or whenever upstream cleans up the internal reference. Logged here so that future-me sees the warning, recognises it, and moves on without spending time chasing a non-issue.
+
 ### dbt (advanced from Project #1)
 
 _(to be populated during Phase 4 — incremental models, partitioning, dbt_utils,

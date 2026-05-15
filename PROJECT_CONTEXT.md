@@ -2,15 +2,29 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-14 (Phase 3 session 1 closed — Airflow stack live, first DAG running end-to-end).
+> Last updated: 2026-05-15 (Phase 3 session 2 closed — verify_one_day task shipped, UI trigger form enabled).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** Phase 3 — session 1 ✅ DONE. Next session opens **Phase 3 session 2 (Airflow polish + scheduled-run observation)**.
+**Current phase:** Phase 3 — sessions 1 + 2 ✅ DONE. Next session opens **Phase 4 session 1 (dbt transformations)**. Remaining Phase 3 stretch items (VS Code Dev Containers) deferred to Phase 6 polish per the original plan.
 
-**Last action (2026-05-14 — Phase 3 session 1):** Full Airflow stack stood up via Docker Compose, first DAG written and parsing cleanly, manual trigger of two consecutive incremental days (2014-01-01, 2014-01-02) succeeded end-to-end. 56,860 rows moved through the pipeline orchestrated by Airflow (no human in the loop after the trigger). Independent Snowflake-side verification returned six PASS rows.
+**Last action (2026-05-15 — Phase 3 session 2):** Added `verify_one_day` task downstream of `extract_one_day` in `m5_daily_extract`. Three independent Snowflake-side checks (CALENDAR = 1 row, SELL_PRICES > 0, SALES_TRAIN > 0) batched into one SQL round-trip. **Caught a real silent failure within 10 minutes of deployment** — today's `2026-05-15` auto-fire (no M5 data for that date) returned 0 rows from extract without error; verify queried Snowflake, found 0 rows on all three checks, raised RuntimeError, task square went red. Pipeline correctly reported "the data did not actually land." UI trigger form enabled via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true`; 20-minute UI gotcha around play-arrow vs `w/ config` buttons documented in LEARNINGS. Test trigger for `2014-01-04` via UI form: extract + verify both green end-to-end.
+
+**Files added this session (Phase 3 session 2):**
+
+- `docs/screenshots/00_verify_caught_silent_failure_2026-05-15_log.png` — Airflow task Logs view showing the three CALENDAR/SELL_PRICES/SALES_TRAIN count lines plus the RuntimeError raised when verify caught the silent failure. Interview-ready evidence.
+- `docs/screenshots/01_ui_trigger_form_with_date_picker.png` — the trigger-with-config form filled in for 2014-01-04, showing the Logical Date field, Run id, Configuration JSON, before clicking Trigger. Demonstrates the UI form working.
+
+**Files updated this session (Phase 3 session 2):**
+
+- `airflow/dags/m5_daily_extract.py` — added `verify_one_day` @task downstream of `extract_one_day`, plus `import logging` at module top. Single-SELECT three-COUNT verification query, three positional `%s` binds, per-check logging via `logging.getLogger("airflow.task")`. Task chain wired via `extract_one_day() >> verify_one_day()`. Now 213 lines (was 134).
+- `airflow/docker-compose.yml` — added `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'` to the shared `x-airflow-common.environment` block with a 3-line comment. Required full `down` + `up -d` cycle to take effect.
+- `LEARNINGS.md` — three new entries under the Airflow section: (a) verify_one_day caught a real silent failure on first deploy, (b) `SHOW_TRIGGER_FORM_IF_NO_PARAMS=true` + the two-button UI gotcha, (c) harmless `core/sql_alchemy_conn` deprecation warning.
+- `README.md` — three light-touch edits: Status line updated to Phase 3 closed / Phase 4 next; Airflow bullet enhanced to mention independent verify tasks ("catch silent failures inside the DAG"); `CODE_QUALITY.md` reference updated 9-point → 10-point.
+- `PROJECT_PLAN.md` — five stale-bit refreshes earlier in the session (Source DB row, pre-flight checklist, decisions-confirmed section, Status block, header date). Already committed and pushed as commit `9e25491`.
+- `PROJECT_CONTEXT.md` — this file, session 2 closeout.
 
 **Files added this session (Phase 3 session 1):**
 
@@ -188,17 +202,30 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 
 **Phase 3 session 1 closed.** Session 2 opens with Airflow polish: downstream verify task, scheduled-run observation, UI trigger-with-config enabled.
 
-### Quick start for Phase 3 session 2
+### Session 2 (2026-05-15 — ✅ DONE)
+
+1. ✅ Re-anchored on PROJECT_CONTEXT.md + PROJECT_PLAN.md; refreshed 5 stale spots in PROJECT_PLAN.md and pushed as commit `9e25491` (small docs-only commit early in the session).
+2. ✅ Added `verify_one_day` @task downstream of `extract_one_day` in `m5_daily_extract`. Three Snowflake-side checks batched into one SQL round-trip. Task chain: `extract_one_day() >> verify_one_day()`. Per-check logging added.
+3. ✅ End-to-end test trigger for `2014-01-03` via Airflow CLI: extract + verify both green. Three count log lines visible: CALENDAR=1, SELL_PRICES=25,939, SALES_TRAIN=30,490.
+4. ✅ **Real silent failure caught:** today's `2026-05-15` auto-fire upon unpause extracted 0 rows (no M5 data for that date), extract returned cleanly, verify raised RuntimeError on all three checks. Exactly the failure mode the verify task was built to catch.
+5. ✅ Enabled UI trigger-with-config form via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'` in docker-compose.yml. Full `down` + `up -d` cycle to apply. Diagnosed via `docker compose exec airflow-webserver airflow config get-value webserver show_trigger_form_if_no_params` → returned `true`.
+6. ✅ UI gotcha resolved: Airflow 2.10 has two trigger buttons. Play-arrow always quick-fires; "Trigger DAG w/ config" (dropdown) opens the form. ~20 min lost; full diagnosis in LEARNINGS.
+7. ✅ Test UI trigger for `2014-01-04T00:00:00+00:00` via the form: extract + verify both green. Screenshot saved.
+8. ✅ README.md refreshed (3 light edits) — status line, Airflow bullet, code-quality reference. Bigger README rewrite remains in Phase 6.
+9. ✅ LEARNINGS.md updated with three entries; PROJECT_CONTEXT.md updated (this file); git add + commit + push.
+
+**Phase 3 closed.** Both technical sessions done; remaining stretch items (Dev Containers) rolled into Phase 6 polish per the original plan. **Phase 4 (dbt transformations) opens the next session.**
+
+### Quick start for Phase 4 session 1
 
 ```powershell
 cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 .\.venv\Scripts\Activate.ps1
-cd airflow
-docker compose up -d                                    # boot stack if not running
-docker compose ps                                       # verify all three healthy
 # Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
-# Open Airflow UI: http://localhost:8080  (airflow / airflow)
-# Check for any auto-fired runs since last session via Grid view.
+# Airflow stack does not need to be running for Phase 4 work -- dbt builds
+# happen against Snowflake directly. Boot only if you want to run a DAG.
+# First Phase 4 step (likely): initialise dbt project structure, configure
+# profiles.yml with our Snowflake creds, source the existing RAW tables.
 ```
 
 ---

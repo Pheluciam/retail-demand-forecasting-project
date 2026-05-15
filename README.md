@@ -2,7 +2,7 @@
 
 > A production-grade retail demand-planning analytics platform built on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 Forecasting) is ingested from Azure SQL Database into Snowflake via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
-**Status:** 🚧 In development — Phase 1 complete (Azure SQL source database loaded with M5 data: 1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train). Phase 2 (Snowflake + extraction) next.
+**Status:** 🚧 In development — Phase 3 in flight (Airflow orchestration live: first DAG runs end-to-end with `extract_one_day` → `verify_one_day` task chain, verifying row counts independently in Snowflake on every run). Phases 0–2 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min). Phase 4 (dbt transformations) next.
 
 ---
 
@@ -10,7 +10,7 @@
 
 - **End-to-end pipeline** from operational source database to BI dashboard
 - **Cloud warehouse** (Snowflake) and **cloud-hosted source** (Azure SQL Database)
-- **Orchestrated execution** via Apache Airflow (Docker)
+- **Orchestrated execution** via Apache Airflow (Docker), with independent Snowflake-side verification tasks that catch silent failures inside the DAG
 - **Production-grade dbt** with `dbt_utils`, tests, packages, partitioned incremental fact models, and a dedicated marts layer
 - **Realistic enterprise pattern**: relational source (representing an ERP / Microsoft Dynamics system) → cloud warehouse → BI tool
 - **Five-page Power BI dashboard** covering executive overview, demand by hierarchy, promotion analysis, seasonality, and forecast vs actual
@@ -72,7 +72,7 @@ The M5 dataset (~58M rows of daily sales across 30,000 SKUs and 10 stores) is la
 
 - **`PROJECT_PLAN.md`** — full plan, scope, timeline, locked decisions, risks
 - **`PROJECT_CONTEXT.md`** — current state and immediate next steps
-- **`CODE_QUALITY.md`** — the 9-point code-quality checklist applied to every non-trivial script in this repo, with concrete examples from the codebase
+- **`CODE_QUALITY.md`** — the 10-point code-quality checklist (7 core checks + 3 failsafes) applied to every non-trivial script in this repo, with concrete examples from the codebase
 - **`LEARNINGS.md`** — running journal of lessons learned across the project
 - **`TEACHING_PREFERENCES.md`** — working-style preferences (relevant to AI-assisted development workflow)
 

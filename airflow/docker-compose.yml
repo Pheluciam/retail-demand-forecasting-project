@@ -53,6 +53,10 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    # Show the "Trigger DAG w/ config" form (calendar date picker + JSON
+    # field) when clicking the Trigger button, even on DAGs that don't
+    # declare params. Adds UI parity with the CLI trigger -e flag.
+    AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # Make the mounted scripts/ folder importable AND scripts inside it
     # discoverable as runnable Python modules.
