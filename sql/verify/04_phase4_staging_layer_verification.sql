@@ -1,5 +1,5 @@
 -- =============================================================================
--- 04_phase4_staging_verification.sql
+-- 04_phase4_staging_layer_verification.sql
 -- =============================================================================
 -- Phase 4 session 2 -- independent Snowflake-side verification of the dbt
 -- staging layer (RETAIL_DB.STAGING).
@@ -23,7 +23,7 @@
 -- How to run:
 --   1. Sign in to Snowsight as PHELUCIAM (RETAIL_ENGINEER role).
 --   2. Paste this entire file into a worksheet named
---      04_phase4_staging_verification.
+--      04_phase4_staging_layer_verification.
 --   3. Run All. Read each section against the Expected block below.
 --
 -- Expected results:

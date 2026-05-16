@@ -683,6 +683,114 @@ Classic SQL trap: `'' IS NOT NULL` evaluates to **TRUE** in every major dialect 
 
 **Flagged for Phase 6 polish or Project 3.** Current `dim_calendar` works for the analytics this project will surface (M5 is a complete daily-grain dataset for the dates it covers — there genuinely are no missing dates within the 2011-01-29 to 2014-03-21 window once the full backfill is loaded). But the discipline rule — *dimensions are independent of fact coverage* — is worth recording now.
 
+**Phase-boundary structural audit — caught real findings on first use (2026-05-16, Phase 4 session 4)**
+
+Added a new section to `CODE_QUALITY.md` formalising a check that's distinct from the per-script 10-point audit: a **structural pass over the project's file inventory** at each phase or layer boundary. The per-script audit verifies that individual files meet the bar; the structural audit verifies that the collection of files as a whole is internally consistent — no naming collisions, no stale scaffolding, no missing pairings, no test-count drift between schema YAMLs and `dbt build`.
+
+First explicit application caught two real issues: (a) two verify files both prefixed `04_` (`04_phase4_staging_layer_verification.sql` from session 2 colliding with `04_phase4_int_sales_with_prices_verification.sql` from session 3), renamed the latter to `04a_`; (b) three stale `.gitkeep` placeholders in `staging/`/`intermediate/`/`warehouse/` model folders despite those folders now containing real models, deleted them. Both 30-second fixes in-session; both would have been frozen into the session commit otherwise.
+
+**Discipline rule going forward:** end-of-phase structural pass before drafting closeout docs and before the bundled commit. Cheap to run, pays for itself the first time it catches drift.
+
+**Incremental materialization on Snowflake — the `is_incremental()` Jinja guard (2026-05-16)**
+
+`fact_daily_sales` is the first model in the project materialised as `incremental` rather than `view` or `table`. The pattern uses dbt's built-in `is_incremental()` macro to wrap a WHERE clause that only fires on builds *after* the first:
+
+```sql
+{% if is_incremental() %}
+    WHERE sale_date > (SELECT COALESCE(MAX(sale_date), '1900-01-01') FROM {{ this }})
+{% endif %}
+```
+
+First build: this block is skipped → full 32.9M-row historical load. Subsequent builds: only rows newer than the current max `sale_date` enter. The `COALESCE` handles the edge case where the table exists but is empty (rare, but real — partial-failure recovery).
+
+`unique_key='sale_key'` plus the Snowflake default `incremental_strategy='merge'` means dbt does an UPSERT — new rows insert, existing keys update. Safe even if a re-run overlaps a previously-processed date.
+
+**Snowflake clustering — the BigQuery-partition equivalent (2026-05-16)**
+
+Snowflake doesn't have explicit partitions like BigQuery. It has **automatic micro-partitions** (50–500MB compressed slices that the engine manages) and an optional **clustering key** that tells Snowflake how to physically co-locate rows when re-organising those micro-partitions.
+
+`cluster_by=['sale_date']` on `fact_daily_sales` is the equivalent of `PARTITION BY sale_date` in BigQuery: tells Snowflake to keep rows with adjacent `sale_date` values in the same micro-partitions, so date-range queries (the dominant access pattern for a fact table) skip irrelevant micro-partitions and scan less data. Clustering happens automatically in the background — no maintenance commands needed.
+
+**Compute-same-way FK keys vs JOIN-to-dims (2026-05-16)**
+
+Two patterns for wiring fact-table FKs to dimension PKs:
+
+- **JOIN-to-dim** — classical Kimball pattern: `LEFT JOIN dim_item ON fact.item_id = dim_item.item_id` and pull `dim_item.item_key` out. Pros: explicitly validates referential integrity row-by-row at build time. Cons: three joins × 32.9M rows = expensive; if any FK is missing in a dim, the row gets a NULL key without raising an error.
+
+- **Compute-same-way** — call `dbt_utils.generate_surrogate_key(['item_id'])` on both sides. Same input → same MD5 → matching key by construction. No joins. Pros: cheap (no row-by-row JOINs), can't get a NULL key. Cons: doesn't enforce dim coverage at build time — needs a separate `relationships` test to catch orphan FKs.
+
+`fact_daily_sales` uses compute-same-way + three `relationships` tests. The tests caught zero orphans across 32.9M rows in <0.5s each, so the contract is enforced even though we never JOIN. Cheaper at scale, and the test result is the same kind of contract assurance.
+
+**`relationships` test performance on 32.9M rows — sub-second (2026-05-16)**
+
+Three FK `relationships` tests on `fact_daily_sales` (against `dim_item`, `dim_store`, `dim_calendar`) each completed in **under 0.5 seconds** during `dbt build`. That's checking 32.9M × 3 = ~99M FK lookups against dim PKs.
+
+Why so fast: Snowflake's query optimiser sees the test query (`SELECT COUNT(*) FROM fact f WHERE NOT EXISTS (SELECT 1 FROM dim d WHERE d.key = f.key)`) and resolves it as a hash join with the dim's PK in memory. Dims are 1k–3k rows — fits comfortably in a single warehouse XS slot. The optimiser does the heavy lifting; nothing tuning-side needed from us.
+
+Worth knowing because the instinct from row-store databases is "relationships tests on large facts will be slow." On Snowflake (and any columnar warehouse with a half-decent optimiser), they're cheap.
+
+**`dbt_utils.accepted_range` — column-level range assertion (2026-05-16)**
+
+Added `accepted_range` test on `fact_daily_sales.units_sold` with `min_value: 0, inclusive: true` to codify the constraint "no negative units." Verify Section 4 had already confirmed `MIN(units_sold) = 0` empirically, but a dbt test makes the contract machine-enforced rather than human-spotted.
+
+`accepted_range` reads cleaner in test output than the alternative `dbt_utils.expression_is_true` with `expression: 'units_sold >= 0'`. Both work; the range version is dbt-idiomatic for "this column's values are within a range."
+
+**`MissingArgumentsPropertyInGenericTestDeprecation` re-encountered — second time same lesson (2026-05-16)**
+
+Same dbt 1.10+ deprecation we caught in session 3 on the compound-key test. Session 4 hit it again — three occurrences this time, all on the new `relationships` tests in `_warehouse__models.yml`. The fix is identical: wrap the test arguments in an `arguments:` block.
+
+Same pattern, second hit. **Discipline rule reinforced**: every new generic test (any test whose name has a `.` like `dbt_utils.unique_combination_of_columns` or `relationships`) needs the modern `arguments:` wrapping from the start. Treat the deprecation as if it were an error — fix it on first write, not after the deprecation warning surfaces.
+
+**`dim_item` design — no string parsing needed (2026-05-16)**
+
+`PROJECT_CONTEXT.md` had originally noted that `dim_item` would "derive department/category from `item_id` structure (M5 item_ids are `<DEPT>_<CAT>_<NNN>`)." When it came time to actually build it, a check of `stg_m5_sales_train` showed `dept_id` and `cat_id` already shipped as their own columns from M5's source CSV.
+
+Chose `SELECT DISTINCT item_id, dept_id, cat_id FROM stg_m5_sales_train` over splitting `item_id` strings with `SPLIT_PART` or regex. Cleaner: no parsing logic to maintain, no risk of getting the regex wrong, no surface area for "what if the format changes in a future load."
+
+**Lesson**: "derive from structure" should be the *fallback* when the data doesn't ship the columns separately. If staging already has them, take them directly. The plan note from earlier was a guess about what would be needed; check what the data actually has before writing parsing code.
+
+**Two-CTE pattern when there's nothing to derive (2026-05-16)**
+
+`dim_calendar` had a three-CTE shape (`source → enriched → final`) because it derived 10+ new columns (year, quarter, month, day_name, is_weekend, is_holiday, etc.). `dim_item` has nothing to derive — every column comes through unchanged from staging. Dropped the `enriched` middle CTE; the shape is just `source → final`.
+
+**Lesson**: don't add an empty pass-through CTE for symmetry. CTE structure should reflect what the model is *doing*, not pattern-match a previous model. Two-CTE for derivation-free dims, three-CTE for dims that compute attributes. The reader should be able to look at the CTE list and infer what work is happening at each step.
+
+**MD5 surrogate consistency across the star schema (2026-05-16)**
+
+The four warehouse models all use `dbt_utils.generate_surrogate_key()` with the same inputs on both sides of every FK relationship:
+
+| Fact column | Dim PK column | Both compute |
+| --- | --- | --- |
+| `fact_daily_sales.item_key` | `dim_item.item_key` | `MD5(item_id)` |
+| `fact_daily_sales.store_key` | `dim_store.store_key` | `MD5(store_id)` |
+| `fact_daily_sales.date_key` | `dim_calendar.date_key` | `MD5(sale_date)` (== `calendar_date`) |
+| `fact_daily_sales.sale_key` | (none, fact's own PK) | `MD5(item_id, store_id, sale_date)` |
+
+Same MD5 input → same 32-char hex output, deterministically. FK-PK matching is by construction — no need to JOIN-and-lookup at build time. The `relationships` tests catch any drift if a dim is rebuilt with different inputs (defence-in-depth).
+
+**Lesson**: surrogate-key hashing is its own integrity mechanism in a star schema *if* the inputs are identical both sides. Always hash the natural key, not a derived value; never hash all columns. Documented this in `dim_item.sql`'s short header so the next person reading the model sees the contract.
+
+**First full-DAG `dbt build` after incremental fact — 15.26s no-op rebuild (2026-05-16)**
+
+After the initial full-load build of `fact_daily_sales` (~22s for 32.9M rows + 12 tests), the next full-DAG `dbt build --no-partial-parse` ran the entire project in **15.26 seconds**. PASS=66 (1 incremental + 3 tables + 4 views + 58 data tests), WARN=0, ERROR=0.
+
+Why so fast: the incremental's `is_incremental()` block evaluated to "no new dates beyond 2014-03-21" → MERGE found zero new rows → near-instant. The three dims (table materialisations) re-ran fully but they're 3k / 10 / 1k rows. Views are query definitions, not materialisations. Tests are the slow line items.
+
+**The interview talk-track**: "End-to-end retail star schema with 32.9M-row fact, 58 tests, full DAG re-validation in 15 seconds." That's the headline for "show me a dbt project on your portfolio." Cheap to demonstrate, easy to explain why each line of the architecture is the way it is.
+
+**Headline portfolio numbers worth carrying through (2026-05-16)**
+
+Captured for interview / portfolio README closing slides:
+
+- **32,898,710 fact rows** in `fact_daily_sales` (~33M)
+- **$93,559,341.40 total revenue** across the M5 dataset
+- **3,049 items × 10 stores × ~1,148 days** of coverage (2011-01-29 to 2014-03-21)
+- **0 orphan FKs** across three `relationships` tests
+- **58 dbt tests** across the project, full DAG green in 15.26s
+- **34.66% NULL price rate** in the fact (M5 product lifecycle — items not on sale every week)
+
+These are real numbers from a real pipeline. The 32.9M / $93.5M scale-of-data signal is the kind of detail that elevates a portfolio repo from "I followed a tutorial" to "I built and validated a production-shaped pipeline."
+
 ### Power BI (advanced from Project #1)
 
 _(to be populated during Phase 5 — explicit DAX measures, cross-page slicers,

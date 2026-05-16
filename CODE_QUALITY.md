@@ -136,6 +136,81 @@ Long-running operations report what they are doing. Failures surface specifics, 
 
 ---
 
+## Phase-boundary structural audit
+
+Beyond the per-script 10-point audit, a structural pass is applied at each
+**phase or layer boundary** — before a phase is declared "done" and before
+the next phase begins. The per-script audit verifies that individual files
+meet the bar; the structural audit verifies that the project **as a
+collection** is consistent, complete, and free of drift.
+
+### Why this exists
+
+The per-script audit can miss issues that only appear in aggregate:
+
+- **Naming collisions** — two files in the same folder sharing a numeric
+  prefix (e.g. two `04_*.sql` verify files). Each file is fine on its own;
+  together they break monotonic ordering.
+- **Stale scaffolding** — `.gitkeep` placeholders left behind after their
+  folders gained real files. Each individual `.gitkeep` is harmless; the
+  pattern across the project is redundant noise.
+- **Missing pairings** — a `.sql` model without its schema-YAML entry; a
+  verify file whose model has been renamed; a test referencing a column that
+  no longer exists.
+- **Test-count drift** — schema YAMLs and the actual `dbt build` test count
+  diverge silently when models are added or refactored without updating
+  tests.
+
+The cheapest place to catch these is at the **end of each phase**, before
+documentation closeout and before the bundled commit lands.
+
+### What to check
+
+| Check | Question |
+| --- | --- |
+| File inventory | All expected files present (`.sql`, schema YAML, sources, verify, walkthrough)? |
+| Naming monotonicity | File prefixes order monotonically; no collisions? |
+| Scaffolding cleanup | `.gitkeep` only in folders that are still empty? |
+| Pairings | Every model has a schema entry; every verify file has a live model |
+| Test-count parity | Schema-YAML test count matches `dbt build` test count |
+| Doc currency | Walkthrough doc covers every model in the layer; PROJECT_CONTEXT's file lists are accurate |
+
+### When to run
+
+- At the **end of each phase session** that ships meaningful structure
+  (Phase 1 load layer, Phase 2 extract layer, Phase 3 DAG layer, Phase 4
+  each dbt layer, etc.)
+- **Before** drafting closeout docs — findings can be fixed in-session
+  rather than back-and-forth'd in a follow-up commit
+- **Before** the bundled commit — keeps the commit a clean snapshot, not
+  a mix of work + retrospective cleanup
+
+### How
+
+A quick `Glob` or `ls -1` over the relevant folders enumerates files; a
+mental walk-through against the checklist above surfaces drift. Fixes
+applied in-session, then proceed to docs + commit.
+
+### First explicit application: Phase 4 session 4 (2026-05-16)
+
+Caught two issues that would otherwise have been frozen into the session
+commit:
+
+1. `04_phase4_int_sales_with_prices_verification.sql` collided with
+   `04_phase4_staging_layer_verification.sql` — both prefixed `04_`. Renamed
+   the intermediate one to `04a_` to preserve monotonic ordering without
+   renumbering downstream verify files.
+2. Three stale `.gitkeep` placeholders still in `staging/` /
+   `intermediate/` / `warehouse/` model folders despite those folders
+   now containing real models. Removed; only `marts/.gitkeep` remains
+   pending session 5.
+
+Both were 30-second fixes once caught. The cost of catching them
+post-commit would have been a rebase or a follow-up "fix" commit — more
+disruptive, worse history. The audit paid for itself on its first run.
+
+---
+
 ## Why this checklist exists
 
 In any production pipeline, the most expensive defects are the ones caught **after** code has been deployed and data has flowed: re-loads, schema migrations, downstream model rewrites, broken dashboards, stakeholder emails. The checklist is upfront discipline aimed at moving as many of those decisions as possible into **first-pass authoring** — when the cost of changing a column type or compression setting is one edit, not a rollback.
@@ -149,4 +224,4 @@ The structure of this project is deliberately documentation-heavy in support of 
 
 ---
 
-*Last updated: 2026-05-14 (Phase 3 session 1 — added criterion 6, Dev environment hygiene). First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*
+*Last updated: 2026-05-16 (Phase 4 session 4 — added "Phase-boundary structural audit" section; first applied in this session and caught two real findings). Prior milestone: 2026-05-14 (Phase 3 session 1 — added criterion 6, Dev environment hygiene). First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*

@@ -52,3 +52,128 @@ models:
         description: "SNAP redemption window open in Wisconsin. 0 or 1."
         data_tests:
           - not_null
+
+  - name: dim_item
+    description: "Item dimension. One row per distinct M5 item (~3,049 rows). Surrogate item_key via dbt_utils.generate_surrogate_key on item_id. Hierarchy: cat_id → dept_id → item_id (denormalised here so Power BI can roll up either level without re-joining)."
+
+    columns:
+
+      - name: item_key
+        description: "Surrogate key. MD5 hash of item_id, 32-char hex string."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: item_id
+        description: "Natural key. M5 item identifier, e.g. HOBBIES_1_001."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: dept_id
+        description: "Department identifier, e.g. HOBBIES_1. 7 distinct values."
+        data_tests:
+          - not_null
+
+      - name: cat_id
+        description: "Category identifier, e.g. HOBBIES. 3 distinct values (HOBBIES, FOODS, HOUSEHOLD)."
+        data_tests:
+          - not_null
+
+  - name: dim_store
+    description: "Store dimension. One row per distinct M5 store (~10 rows). Surrogate store_key via dbt_utils.generate_surrogate_key on store_id. M5 stores are organised by state: 4 CA + 3 TX + 3 WI."
+
+    columns:
+
+      - name: store_key
+        description: "Surrogate key. MD5 hash of store_id, 32-char hex string."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: store_id
+        description: "Natural key. M5 store identifier, e.g. CA_1, TX_2, WI_3."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: state_id
+        description: "State identifier. 3 distinct values (CA, TX, WI)."
+        data_tests:
+          - not_null
+
+  - name: fact_daily_sales
+    description: "Daily sales fact. Grain = one row per item × store × day. ~32.9M rows full load. Incremental on sale_date, clustered on sale_date. FK surrogates (item_key, store_key, date_key) computed via the same generate_surrogate_key inputs as the three dims, so FK-PK matching is by construction."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - item_id
+              - store_id
+              - sale_date
+
+    columns:
+
+      - name: sale_key
+        description: "Surrogate row key. MD5 hash of (item_id, store_id, sale_date). Unique row identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: item_key
+        description: "FK to dim_item.item_key. MD5 hash of item_id."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+
+      - name: store_key
+        description: "FK to dim_store.store_key. MD5 hash of store_id."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_store')
+                field: store_key
+
+      - name: date_key
+        description: "FK to dim_calendar.date_key. MD5 hash of sale_date."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_calendar')
+                field: date_key
+
+      - name: item_id
+        description: "Natural item key. Carried through for traceability."
+        data_tests:
+          - not_null
+
+      - name: store_id
+        description: "Natural store key. Carried through for traceability."
+        data_tests:
+          - not_null
+
+      - name: sale_date
+        description: "Date of the sales observation. Clustering key."
+        data_tests:
+          - not_null
+
+      - name: units_sold
+        description: "Units sold on this item × store × day. Non-negative integer; zero is a legitimate 'product on shelf, didn't sell' signal."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: sell_price
+        description: "Item price at this store for the fiscal week containing sale_date. Nullable by design — NULL means the item wasn't on sale that week (M5 product lifecycle)."
+
+      - name: revenue_amount_usd
+        description: "units_sold * sell_price. Nullable when sell_price is NULL."

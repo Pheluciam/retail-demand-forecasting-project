@@ -3,8 +3,9 @@
 > Companion to `EXTRACT_PIPELINE.md`. This doc explains the dbt project that
 > transforms RAW Snowflake data into the analytical layers that power Power BI.
 >
-> Last updated: 2026-05-16 (Phase 4 session 3 — `dbt_utils`, first
-> intermediate model, first warehouse-layer dim).
+> Last updated: 2026-05-16 (Phase 4 session 4 — `dim_item`, `dim_store`,
+> first incremental fact `fact_daily_sales`, structural-audit principle
+> applied to the dbt layer).
 
 ---
 
@@ -989,12 +990,368 @@ returns PASS / PASS (uniqueness + weekend rate 28.64% inside the
 
 ---
 
+## `dim_item` walkthrough
+
+Second warehouse model. Goal: one row per distinct item, surrogate key,
+ready for the fact to FK into.
+
+### Design call: source-side vs string parsing
+
+`PROJECT_CONTEXT.md` originally flagged that `dim_item` would derive
+`department` and `category` from the `item_id` string (M5 item_ids look
+like `HOBBIES_1_001`). When it came time to build, a check of
+`stg_m5_sales_train` showed `dept_id` and `cat_id` already shipped as
+their own columns from M5's source CSV.
+
+Chose source-side over string parsing:
+
+```sql
+SELECT DISTINCT item_id, dept_id, cat_id FROM {{ ref('stg_m5_sales_train') }}
+```
+
+vs the alternative:
+
+```sql
+SELECT
+    item_id,
+    SPLIT_PART(item_id, '_', 1) || '_' || SPLIT_PART(item_id, '_', 2) AS dept_id,
+    SPLIT_PART(item_id, '_', 1)                                       AS cat_id
+FROM ...
+```
+
+The source-side approach: cleaner, no parsing logic to maintain, no risk
+of getting the format wrong. **Discipline rule**: prefer source-truth
+over derivation when the data already has the columns.
+
+### Shape: two CTEs (no `enriched` middle CTE)
+
+`dim_calendar` had a `source → enriched → final` three-CTE shape because
+it derived 10+ new columns. `dim_item` has nothing to derive — every
+column comes through unchanged from staging. Dropped the middle CTE:
+
+```sql
+WITH source AS (
+    SELECT DISTINCT item_id, dept_id, cat_id
+    FROM {{ ref('stg_m5_sales_train') }}
+),
+
+final AS (
+    SELECT
+        {{ dbt_utils.generate_surrogate_key(['item_id']) }} AS item_key,
+        item_id, dept_id, cat_id
+    FROM source
+)
+
+SELECT * FROM final
+```
+
+CTE structure should reflect what the model is doing, not pattern-match
+a previous model. Two-CTE for derivation-free dims; three-CTE for dims
+that compute attributes.
+
+### Tests + verification
+
+6 tests in `_warehouse__models.yml`: `unique` + `not_null` on both
+`item_key` and `item_id`, `not_null` on `dept_id` and `cat_id`.
+
+`sql/verify/06_phase4_dim_item_verification.sql` covers row count + key
+uniqueness (expects 3,049 = 3,049 = 3,049), hierarchy cardinality (3
+categories, 7 departments — M5 invariants), 5-row attribute eyeball,
+single-row PASS/FAIL rollup.
+
+Materialised: 3,049 rows as a table in `RETAIL_DB.WAREHOUSE.DIM_ITEM`.
+
+---
+
+## `dim_store` walkthrough
+
+Smallest dim in the project: 10 rows. Same shape as `dim_item`, same
+source-side-not-parsing decision (M5 ships `state_id` as its own column,
+so no need to parse `store_id` strings).
+
+```sql
+WITH source AS (
+    SELECT DISTINCT store_id, state_id
+    FROM {{ ref('stg_m5_sales_train') }}
+),
+
+final AS (
+    SELECT
+        {{ dbt_utils.generate_surrogate_key(['store_id']) }} AS store_key,
+        store_id, state_id
+    FROM source
+)
+
+SELECT * FROM final
+```
+
+5 tests, all passing.
+
+`sql/verify/07_phase4_dim_store_verification.sql` covers row count + key
+uniqueness (expects 10), state distribution (CA=4, TX=3, WI=3 — M5
+invariants), full-table eyeball (10 rows fits, no LIMIT), single-row
+PASS/FAIL rollup.
+
+Materialised: 10 rows as a table in `RETAIL_DB.WAREHOUSE.DIM_STORE`.
+
+---
+
+## `fact_daily_sales` walkthrough — the centrepiece
+
+The first fact table in the project, the first incremental model, the
+first model with Snowflake clustering. Grain: **one row per item ×
+store × day**. Full load: ~32.9M rows. Source: `int_sales_with_prices`.
+
+### Materialization config
+
+```sql
+{{ config(
+    materialized='incremental',
+    unique_key='sale_key',
+    cluster_by=['sale_date'],
+    on_schema_change='fail'
+) }}
+```
+
+**`materialized='incremental'`** — first build is a full load;
+subsequent builds only process rows the `is_incremental()` block lets
+through. Saves re-processing 32.9M rows every time dbt runs.
+
+**`unique_key='sale_key'`** — together with Snowflake's default
+`incremental_strategy='merge'`, dbt does an UPSERT against the existing
+table: rows with a `sale_key` already in the table get UPDATEd; new
+`sale_key`s INSERT. Safe even if a re-run overlaps a date that's
+already been processed.
+
+**`cluster_by=['sale_date']`** — Snowflake clustering. See "Snowflake
+clustering" subsection below.
+
+**`on_schema_change='fail'`** — defensive default. If a future change
+adds or renames a column, dbt errors instead of silently truncating
+data. Explicit beats implicit on a fact table you care about.
+
+### The `is_incremental()` Jinja guard
+
+```sql
+WITH source AS (
+    SELECT
+        item_id, store_id, sale_date,
+        units_sold, sell_price, revenue_amount_usd
+    FROM {{ ref('int_sales_with_prices') }}
+
+    {% if is_incremental() %}
+        WHERE sale_date > (
+            SELECT COALESCE(MAX(sale_date), '1900-01-01')
+            FROM {{ this }}
+        )
+    {% endif %}
+),
+```
+
+`is_incremental()` returns FALSE on the first build (target table
+doesn't exist yet) → the WHERE block is skipped → full historical load.
+Returns TRUE on every subsequent build → only rows with a newer
+`sale_date` than the current table's max enter.
+
+The `COALESCE(MAX(sale_date), '1900-01-01')` handles the edge case of
+"table exists but is empty" — without it, `MAX()` of an empty table is
+NULL, and `WHERE sale_date > NULL` evaluates to UNKNOWN (effectively
+FALSE) on every row → no rows would enter. The COALESCE backstops it.
+
+### Snowflake clustering — the BigQuery-partition equivalent
+
+Snowflake doesn't have explicit partitions like BigQuery
+(`PARTITION BY sale_date`). It has **automatic micro-partitions**
+(50–500MB compressed slices that Snowflake manages internally) and an
+optional **clustering key** that tells Snowflake how to physically
+co-locate rows when re-organising those micro-partitions in the
+background.
+
+`cluster_by=['sale_date']` on the fact is the equivalent of partitioning
+on `sale_date`: tells Snowflake to keep rows with adjacent `sale_date`
+values in the same micro-partitions. Date-range queries (the dominant
+access pattern for a fact table — "show me sales for last week") then
+prune micro-partitions and scan less data.
+
+Clustering happens automatically in background re-organising. No
+maintenance commands needed.
+
+### Compute-same-way FK keys (no JOIN to dims)
+
+The fact has four surrogate keys:
+
+```sql
+final AS (
+    SELECT
+        {{ dbt_utils.generate_surrogate_key(['item_id', 'store_id', 'sale_date']) }} AS sale_key,
+        {{ dbt_utils.generate_surrogate_key(['item_id']) }}                          AS item_key,
+        {{ dbt_utils.generate_surrogate_key(['store_id']) }}                         AS store_key,
+        {{ dbt_utils.generate_surrogate_key(['sale_date']) }}                        AS date_key,
+        item_id, store_id, sale_date,
+        units_sold, sell_price, revenue_amount_usd
+    FROM source
+)
+```
+
+`item_key` here is `MD5(item_id)`. `dim_item.item_key` is also
+`MD5(item_id)`. Same input → same output, deterministically. FK-PK
+matching is by construction — no need to JOIN-and-lookup `dim_item` at
+build time to resolve the key.
+
+**Trade-off**: this approach can't enforce "every fact `item_key`
+corresponds to a row in `dim_item`" at build time the way a JOIN would
+have. That's what the `relationships` tests catch. See next subsection.
+
+### `relationships` tests at scale
+
+Three FK `relationships` tests in `_warehouse__models.yml`:
+
+```yaml
+- name: item_key
+  data_tests:
+    - relationships:
+        arguments:
+          to: ref('dim_item')
+          field: item_key
+```
+
+(and analogous for `store_key` → `dim_store`, `date_key` → `dim_calendar`.)
+
+Each test runs a `WHERE NOT EXISTS` query: "any fact rows whose FK
+doesn't exist in the dim?" Expected count: zero.
+
+**Performance**: each test completed in **<0.5 seconds** on the full
+32.9M-row fact. Snowflake resolves them as hash joins with the dim's PK
+in memory (dims are 1k–3k rows, fits in a single XS warehouse slot).
+The instinct from row-store databases is "relationships tests on large
+facts are slow" — on Snowflake (or any columnar warehouse with a
+half-decent optimiser) they're cheap.
+
+### `accepted_range` test for measure constraints
+
+Codified `units_sold >= 0` as a column-level test:
+
+```yaml
+- name: units_sold
+  data_tests:
+    - not_null
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          inclusive: true
+```
+
+`dbt_utils.accepted_range` is dbt-idiomatic for "this column's values
+are within a range." Cleaner test output than the equivalent
+`dbt_utils.expression_is_true` with `expression: 'units_sold >= 0'`.
+`inclusive: true` makes the boundary unambiguous (0 itself is allowed —
+zero-unit rows are legitimate "product on shelf, didn't sell" demand
+signal).
+
+### Compound-key uniqueness — the grain enforcer
+
+```yaml
+data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+          - item_id
+          - store_id
+          - sale_date
+```
+
+Plus the surrogate `sale_key` has `unique` + `not_null` tests directly.
+
+Two layers of grain enforcement: the natural-key combination
+(`item_id`, `store_id`, `sale_date`) is unique, and the surrogate
+`sale_key` (which is `MD5(item_id, store_id, sale_date)`) is unique.
+Either alone would catch a grain violation; both together catch any
+drift between natural-key uniqueness and surrogate-key computation.
+
+### Modern `arguments:` syntax — dbt 1.10+ deprecation lesson, second hit
+
+The first build raised
+`MissingArgumentsPropertyInGenericTestDeprecation` three times — once
+per `relationships` test. Same deprecation we caught in session 3 on
+the compound-key test. Fix is identical: wrap the test arguments in an
+`arguments:` block:
+
+```yaml
+# Old (deprecated):
+- relationships:
+    to: ref('dim_item')
+    field: item_key
+
+# Modern (dbt 1.10+):
+- relationships:
+    arguments:
+      to: ref('dim_item')
+      field: item_key
+```
+
+**Discipline rule reinforced after two hits**: every new generic test
+(any test whose name has a `.` like `dbt_utils.*`, or the built-in
+`relationships`) needs the modern `arguments:` wrapping from the start.
+Treat the deprecation as if it were an error — fix it on first write,
+not after the deprecation warning surfaces.
+
+### Build outcome
+
+First targeted build (`dbt build --select fact_daily_sales`):
+**32,898,710 rows materialised + 12 tests passing in 21.97 seconds**.
+
+Subsequent full-DAG `dbt build --no-partial-parse`: **15.26 seconds**
+end-to-end across the whole project (1 incremental + 3 tables + 4 views
++ 58 tests). The incremental's `is_incremental()` evaluated to "no new
+dates beyond 2014-03-21" → MERGE found zero new rows → near-instant
+re-validation. The three dims re-materialised fully (table
+materialisations drop + recreate) but they're 3k / 10 / 1k rows. Views
+are query definitions, not materialisations. Tests dominate the runtime
+budget.
+
+### Verification
+
+`sql/verify/08_phase4_fact_daily_sales_verification.sql` covers 6
+sections:
+
+1. Row-count parity with upstream `int_sales_with_prices` (32.9M = 32.9M)
+2. `sale_key` uniqueness across all 32.9M rows
+3. FK referential integrity — counts of orphan FKs against each dim (all zero)
+4. Sale-date coverage + measure sanity (date range, min/max units_sold, NULL-price rate, total revenue)
+5. Five-row eyeball with INNER JOIN to all three dims — proves the star schema is wired end-to-end
+6. Single-row PASS/FAIL rollup
+
+**Total revenue across the dataset: $93,559,341.40 USD.** Real number
+from a real pipeline — worth carrying as scale-of-data signal for
+interview talk-track.
+
+---
+
+## Phase-boundary structural audit applied to the dbt layer
+
+At the close of Phase 4 session 4, a structural pass across the dbt
+project + verify file folder caught two issues that would otherwise
+have been frozen into the session commit:
+
+1. **`04_` filename collision** —
+   `04_phase4_int_sales_with_prices_verification.sql` (session 3) shared
+   a numeric prefix with `04_phase4_staging_layer_verification.sql` (session
+   2). Renamed the intermediate one to `04a_` to preserve monotonic
+   ordering without renumbering downstream `05_` / `06_` / `07_` /
+   `08_` files.
+2. **Stale `.gitkeep` placeholders** — `staging/`, `intermediate/`, and
+   `warehouse/` model folders still had the session-1 scaffolding
+   placeholders despite now containing real models. Removed. Only
+   `marts/.gitkeep` remains pending session 5.
+
+Both were 30-second fixes once caught. The audit principle is documented
+in `CODE_QUALITY.md` → "Phase-boundary structural audit"; this was its
+first explicit application.
+
+---
+
 ## Sections to add as Phase 4 progresses
 
-- `dim_item` and `dim_store` — same surrogate-key pattern, source-truth
-  derivations, larger row counts.
-- `fact_daily_sales` — first incremental model. Partitioning strategy,
-  unique-key config, the `is_incremental()` Jinja conditional.
 - Marts layer — one pre-aggregated mart per Power BI page.
 - `dbt build` orchestration through Airflow (Phase 4 closeout).
 
