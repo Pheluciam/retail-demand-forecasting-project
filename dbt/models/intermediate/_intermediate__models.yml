@@ -1,0 +1,56 @@
+version: 2
+
+models:
+  - name: int_sales_with_prices
+    description: "Daily sales enriched with weekly sell prices. One row per (store, item, sale_date). LEFT JOIN to prices preserves all sales rows; sell_price and revenue_amount_usd are NULL where no matching price exists (~35% of rows — see LEARNINGS for the M5 product-lifecycle reason)."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - store_id
+              - item_id
+              - sale_date
+
+    columns:
+
+      - name: id
+        description: "M5 series id, e.g. 'HOBBIES_1_001_CA_1_evaluation'."
+        data_tests:
+          - not_null
+
+      - name: item_id
+        description: "Item identifier."
+        data_tests:
+          - not_null
+
+      - name: store_id
+        description: "Store identifier."
+        data_tests:
+          - not_null
+
+      - name: d
+        description: "M5 day identifier ('d_NNNN'). Retained for traceability."
+        data_tests:
+          - not_null
+
+      - name: sale_date
+        description: "Real DATE — translated upstream via stg_m5_calendar."
+        data_tests:
+          - not_null
+
+      - name: wm_yr_wk
+        description: "Walmart fiscal year+week. Attached via the calendar lookup. Bridge to sell_prices."
+        data_tests:
+          - not_null
+
+      - name: units_sold
+        description: "Units sold for that (item, store, day)."
+        data_tests:
+          - not_null
+
+      - name: sell_price
+        description: "Weekly retail price (USD), from stg_m5_sell_prices. NULL where no matching price row exists for (store, item, fiscal week)."
+
+      - name: revenue_amount_usd
+        description: "units_sold * sell_price, in USD. NULL when sell_price is NULL ('unknown', not 'zero')."

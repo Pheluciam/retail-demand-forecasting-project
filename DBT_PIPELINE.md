@@ -3,7 +3,8 @@
 > Companion to `EXTRACT_PIPELINE.md`. This doc explains the dbt project that
 > transforms RAW Snowflake data into the analytical layers that power Power BI.
 >
-> Last updated: 2026-05-15 (Phase 4 session 1).
+> Last updated: 2026-05-16 (Phase 4 session 3 — `dbt_utils`, first
+> intermediate model, first warehouse-layer dim).
 
 ---
 
@@ -512,14 +513,488 @@ the `units_sold` rename all worked as designed.
 
 ---
 
+## Package management — installing `dbt_utils`
+
+dbt has a first-class package system, mirroring `npm` for Node, `pip`
+for Python, `cargo` for Rust. Three moving parts that show up in this
+project from Phase 4 session 3:
+
+### `packages.yml` — declares dependencies
+
+Lives next to `dbt_project.yml`. One entry per external package:
+
+```yaml
+packages:
+  - package: dbt-labs/dbt_utils
+    version: [">=1.1.1", "<2.0.0"]
+```
+
+The version range pins to the **1.x** major (semver — any 1.x release
+is API-compatible; a hypothetical 2.0 would be breaking). `dbt deps`
+resolves the latest matching version (`1.3.3` at install time).
+
+### `dbt deps` — the install command
+
+```powershell
+cd dbt
+dbt deps
+```
+
+Reads `packages.yml`, downloads matching versions from the dbt Hub
+(or Git, for non-hub packages), drops them under `dbt_packages/`.
+Idempotent — safe to re-run.
+
+### `package-lock.yml` — auto-generated, committed
+
+`dbt deps` writes `dbt/package-lock.yml` recording the *exact* version
+that resolved (here, `dbt_utils 1.3.3`). Same role as `package-lock.json`
+or `Pipfile.lock` — guarantees reproducible installs across machines
+and CI even if a 1.3.4 ships tomorrow. **Commit it.**
+
+### `dbt_packages/` — gitignored
+
+The actual installed package code lives under `dbt/dbt_packages/`.
+Already covered by `.gitignore` line 78. Same logic as `node_modules/`
+— regenerated from `packages.yml` + lockfile via `dbt deps`, never
+edited directly.
+
+**What `dbt_utils` gives us.** Compound-key uniqueness tests, surrogate
+key generation, `not_empty_string`, pivot helpers, date-spine generation,
+many others. Library of community macros that solve problems every dbt
+project hits. Maintained by dbt-labs itself, so it's safe and stable.
+
+---
+
+## Compound-key tests via `dbt_utils.unique_combination_of_columns`
+
+`stg_m5_sell_prices` has no single-column unique key — its natural key
+is the compound `(store_id, item_id, wm_yr_wk)`. dbt's built-in `unique`
+test only handles single columns. `dbt_utils` ships the multi-column
+equivalent.
+
+### The dbt 1.10+ `arguments:` syntax
+
+Declared at the **model level** (not under a column), since it's a
+property of the row, not any single column:
+
+```yaml
+- name: stg_m5_sell_prices
+  data_tests:
+    - dbt_utils.unique_combination_of_columns:
+        arguments:
+          combination_of_columns:
+            - store_id
+            - item_id
+            - wm_yr_wk
+```
+
+The `arguments:` nesting is required from dbt 1.10. Older syntax
+omitted it (`combination_of_columns:` lived directly under the test
+name); dbt now emits a `MissingArgumentsPropertyInGenericTestDeprecation`
+warning if you write the old form. Same semantics, one extra indent.
+
+### What it compiles to
+
+After `dbt build`, the literal SQL Snowflake ran lives at
+`dbt/target/compiled/retail_demand_forecasting/models/staging/_staging__models.yml/dbt_utils_unique_combination_o_<hash>.sql`.
+Opening that file shows roughly:
+
+```sql
+SELECT
+    store_id, item_id, wm_yr_wk
+FROM RETAIL_DB.STAGING.STG_M5_SELL_PRICES
+GROUP BY store_id, item_id, wm_yr_wk
+HAVING COUNT(*) > 1
+```
+
+Same elegant contract as every dbt test: **zero rows back = pass, any
+rows back = fail and they show you exactly which combinations duplicate.**
+Worth reading the compiled SQL once for any new macro — demystifies
+what dbt is actually asking Snowflake to do.
+
+---
+
+## Intermediate layer — `int_sales_with_prices` walkthrough
+
+The intermediate layer sits between staging (light passthrough) and
+warehouse (the published star schema). **Job: business-logic joins
+and derivations.** Think of it as the workshop bench where source-aligned
+shapes get assembled into business-aligned shapes before going to the
+published star.
+
+`int_sales_with_prices` is the first intermediate model. It joins
+daily sales to weekly prices via the calendar bridge and computes
+`revenue_amount_usd`. Output: 32,898,710 rows (one per sale row,
+LEFT-JOIN preserves all of them), materialised as a view.
+
+### CTE structure — `source → enriched → final` shape
+
+```sql
+WITH sales AS (
+    SELECT * FROM {{ ref('stg_m5_sales_train') }}
+),
+
+prices AS (
+    SELECT * FROM {{ ref('stg_m5_sell_prices') }}
+),
+
+calendar AS (
+    SELECT d, wm_yr_wk FROM {{ ref('stg_m5_calendar') }}
+),
+
+sales_with_week AS (
+    SELECT
+        sales.*,
+        calendar.wm_yr_wk
+    FROM sales
+    LEFT JOIN calendar USING (d)
+),
+
+joined AS (
+    SELECT
+        sales_with_week.id,
+        sales_with_week.item_id,
+        sales_with_week.store_id,
+        sales_with_week.d,
+        sales_with_week.sale_date,
+        sales_with_week.wm_yr_wk,
+        sales_with_week.units_sold,
+        prices.sell_price,
+        sales_with_week.units_sold * prices.sell_price AS revenue_amount_usd
+    FROM sales_with_week
+    LEFT JOIN prices
+        ON sales_with_week.store_id = prices.store_id
+        AND sales_with_week.item_id = prices.item_id
+        AND sales_with_week.wm_yr_wk = prices.wm_yr_wk
+)
+
+SELECT * FROM joined
+```
+
+### What each CTE does
+
+| CTE | Role |
+|---|---|
+| `sales` | Pull from `stg_m5_sales_train`. One row per (item, store, day). |
+| `prices` | Pull from `stg_m5_sell_prices`. One row per (store, item, fiscal week). |
+| `calendar` | Slim projection — just the columns needed for the join (`d` → `wm_yr_wk`). |
+| `sales_with_week` | Attach `wm_yr_wk` to every sale via LEFT JOIN on `d`. Bridge step. |
+| `joined` | LEFT JOIN to prices, compute `revenue_amount_usd`. The business-logic step. |
+
+### Why two LEFT JOINs
+
+**The sales × calendar join.** Every sale row should match exactly one
+calendar row (`d` is the calendar's natural key). LEFT JOIN here is
+the safe-default form — INNER would also work since `stg_m5_sales_train`
+already enforced the `sale_date NOT NULL` join sentinel back in staging.
+Kept as LEFT JOIN for consistency with the next step.
+
+**The sales × prices join.** This is where LEFT JOIN earns its keep.
+**34.66% of sales rows have no matching price** — M5 only carries
+`sell_prices` rows for actively-stocked items. INNER JOIN would silently
+drop 11.4M rows. LEFT JOIN preserves them with NULL price. Verified
+that *none* of those priceless rows have positive units sold (anomaly
+check in the verify file) — they're legitimate "product not on shelf"
+rows, useful demand signal, intentionally kept.
+
+### NULL semantics — `units_sold * NULL = NULL`
+
+The revenue calculation propagates NULL automatically:
+
+```sql
+sales_with_week.units_sold * prices.sell_price AS revenue_amount_usd
+```
+
+When `sell_price` is NULL, `units_sold * NULL` returns NULL. This is
+**correct** — we don't know the revenue, not zero revenue. Downstream
+aggregations need to treat these as "unknown" rather than collapsing
+to zero. The column description in `_intermediate__models.yml` calls
+this out explicitly. The `not_null` test is deliberately **omitted** on
+both `sell_price` and `revenue_amount_usd` — those NULLs are by design.
+
+### Tests on the intermediate model
+
+Schema YAML at `dbt/models/intermediate/_intermediate__models.yml`.
+Eight tests total:
+
+| Test | Column(s) | Why |
+|---|---|---|
+| `dbt_utils.unique_combination_of_columns` | `(store_id, item_id, sale_date)` | Confirms no fan-out from the join. |
+| `not_null` | `id` | Sales-side PK component. |
+| `not_null` | `item_id` | Sales-side PK component. |
+| `not_null` | `store_id` | Sales-side PK component. |
+| `not_null` | `d` | Sales-side PK component. |
+| `not_null` | `sale_date` | Inherited from staging join sentinel. |
+| `not_null` | `wm_yr_wk` | Calendar bridge — NULL here would mean calendar miss. |
+| `not_null` | `units_sold` | Sales fact. |
+
+`dbt build --select int_sales_with_prices` → PASS=9 (1 view + 8 tests).
+
+---
+
+## Warehouse layer + materialization transition
+
+`dim_calendar` is the first warehouse-layer model. Crossing this folder
+boundary flips the default materialization from `view` to `table` —
+no per-model override needed, just the per-folder config in
+`dbt_project.yml`:
+
+```yaml
+models:
+  retail_demand_forecasting:
+    intermediate:
+      +materialized: view
+    warehouse:
+      +materialized: table
+```
+
+### View vs table — the economics
+
+| Aspect | View | Table |
+|---|---|---|
+| Storage cost | None — just a saved SELECT | Pays per byte stored |
+| Query cost | Recomputes the SELECT every query | Reads pre-built storage |
+| Freshness vs upstream | Always reflects current upstream | Stale until next `dbt run` |
+| Best for | Staging, intermediate (light compute, freshness matters) | Warehouse + marts (read-many, latency matters) |
+
+**Why warehouse defaults to table.** Power BI and downstream consumers
+hit these models thousands of times. A view-on-view-on-view stack
+would re-compute the entire transformation chain on every query.
+Pre-materializing tables once per dbt run is the right trade — pay
+storage cost once, save compute on every read.
+
+### What dbt actually issues
+
+For a table-materialized model, `dbt run` sends Snowflake roughly:
+
+```sql
+CREATE OR REPLACE TABLE RETAIL_DB.WAREHOUSE.DIM_CALENDAR AS
+SELECT ...
+FROM ...
+```
+
+`CREATE OR REPLACE` makes the rebuild idempotent — old table dropped
+atomically, new one swapped in. Compiled SQL lives under
+`dbt/target/run/<project>/models/warehouse/dim_calendar.sql` after a
+build; worth reading once to see the literal CREATE statement dbt
+sends over the wire.
+
+---
+
+## Surrogate keys via `dbt_utils.generate_surrogate_key`
+
+Every warehouse dim gets a surrogate key as its primary key, separate
+from whatever natural key the source provided. `dim_calendar` uses
+`dbt_utils.generate_surrogate_key`:
+
+```sql
+{{ dbt_utils.generate_surrogate_key(['calendar_date']) }} AS date_key
+```
+
+### What it compiles to
+
+Roughly `MD5(NVL(calendar_date::VARCHAR, '_dbt_utils_surrogate_key_null_')) AS date_key`.
+Output: a stable 32-character hex string. Same input always produces
+the same output. The MD5 hash gives us:
+
+- **A single column standing in for the natural key.** No matter what
+  the natural key looks like (single column, compound, mixed types),
+  the surrogate is one VARCHAR(32).
+- **Deterministic.** Re-running the dim from scratch produces identical
+  keys for identical rows. Fact tables that already hold `date_key`
+  values stay valid.
+
+### Why surrogate keys are worth the Jinja line
+
+1. **Decoupling from upstream natural-key drift.** If the source ever
+   renames `calendar_date` to `cal_dt` or changes its type, the dim's
+   downstream contract (`date_key`) holds. Only the dim's own surrogate
+   expression changes.
+2. **SCD-2 readiness.** For Type-2 slowly-changing dimensions (e.g.
+   if `dim_item` later tracks category history over time), the same
+   natural key needs to appear in multiple dim rows, each with its
+   own validity window. Surrogate keys handle this trivially — include
+   the validity window in the key columns, every version gets a
+   distinct hash.
+3. **Multi-column natural keys collapse to one column.** Where a dim's
+   natural key is compound, the macro accepts a list:
+   `generate_surrogate_key(['store_id', 'item_id', 'wm_yr_wk'])`.
+   Output is still one 32-char hex string. Facts join on one column.
+
+### The `{{ }}` Jinja invocation pattern
+
+`{{ dbt_utils.generate_surrogate_key(['calendar_date']) }}` is a Jinja
+expression — at compile time, dbt evaluates it and substitutes the
+resulting SQL into the model file. The model on disk has the `{{ }}`
+expression; the compiled SQL Snowflake sees has the raw `MD5(...)` call.
+Same templating mechanism as `{{ ref('...') }}` and `{{ source('...') }}`.
+
+---
+
+## `dim_calendar` walkthrough
+
+First warehouse-layer model. One row per date. Output: 1,079 rows
+(more on the row count below).
+
+### Source-truth principle — derive everything from `calendar_date`
+
+M5's source `calendar.csv` already pre-computes `weekday`, `wday`,
+`month`, `year`. `dim_calendar` deliberately **ignores** those and
+derives its own analytical attributes fresh from `calendar_date`:
+
+```sql
+DATE_PART('year', calendar_date)    AS year,
+DATE_PART('quarter', calendar_date) AS quarter,
+DATE_PART('month', calendar_date)   AS month,
+MONTHNAME(calendar_date)            AS month_name,
+DATE_PART('day', calendar_date)     AS day_of_month,
+DAYOFWEEKISO(calendar_date)         AS day_of_week,
+DAYNAME(calendar_date)              AS day_name,
+WEEKISO(calendar_date)              AS week_of_year,
+```
+
+**Why.** Single source of truth. If M5's `weekday` ever disagrees with
+Snowflake's `DAYNAME` for any date, we'd want to know — but more
+importantly, *the dim's own values become the canonical reference*.
+Downstream analysts pulling from `dim_calendar` aren't accidentally
+inheriting M5's particular weekday convention.
+
+### ISO date variants for session-independence
+
+- `DAYOFWEEKISO(calendar_date)` — ISO 8601: Monday = 1, Sunday = 7.
+  Fixed by international standard. Unchangeable.
+- `WEEKISO(calendar_date)` — ISO 8601 week number. Fixed.
+- Plain `DAYOFWEEK` and `WEEK` would respond to Snowflake's session
+  `WEEK_START` and `WEEK_OF_YEAR_POLICY` parameters — different
+  account, different default, different answer for the same date.
+  Not what you want in a published dim.
+
+### `is_weekend` via `DAYNAME` for convention-independence
+
+```sql
+CASE
+    WHEN DAYNAME(calendar_date) IN ('Sat', 'Sun')
+    THEN TRUE
+    ELSE FALSE
+END AS is_weekend
+```
+
+`DAYNAME` returns three-letter English abbreviations regardless of
+session locale. A numeric `DAYOFWEEK = 6 OR DAYOFWEEK = 7` check would
+break if `WEEK_START` changes. The string-based check is invariant.
+
+### `is_holiday` Boolean roll-up
+
+```sql
+CASE
+    WHEN event_name_1 IS NOT NULL OR event_name_2 IS NOT NULL
+    THEN TRUE
+    ELSE FALSE
+END AS is_holiday
+```
+
+Single-column Boolean derived from M5's two event-name columns. Useful
+for downstream marts that need a simple "was this a holiday?" filter
+without unpacking the event-name detail. The original `event_name_1`
+and `event_name_2` are kept alongside for analysts who want the named
+event itself.
+
+**Implicit NULL-vs-empty-string verification.** The eyeball check on
+a random Friday with no event returned `is_holiday = FALSE` correctly
+— which proves the source values are genuine NULLs, not empty strings.
+`'' IS NOT NULL` is TRUE in every SQL dialect; if M5's events were
+loaded as empty strings, every non-event day would have flipped to
+`is_holiday = TRUE`. Subtle but worth knowing.
+
+### Coverage — the 1,079 rows and the future date-spine
+
+`dim_calendar` currently spans **2011-01-29 to 2014-03-21**, mirroring
+what's been extracted to RAW. There are gaps (the planned cutoff was
+2014-01-04; 2014-03-21 came from a Phase 2 smoke-test extract).
+
+**In production, `dim_calendar` is typically procedurally generated**
+— a continuous spine from some start date (e.g. 2010-01-01) to some
+end date (e.g. 2030-12-31), independent of fact coverage. Why: Power
+BI's time-series axes assume the dim is continuous. A missing date
+shows as a continuous line, not a flat zero — collapsing 14 missing
+days into 0 days visually.
+
+Standard pattern uses `dbt_utils.date_spine()` to generate the spine,
+then LEFT JOINs source attributes (`event_name_*`, `wm_yr_wk`, SNAP
+flags) onto it. **Flagged for Phase 6 polish or Project 3.** Current
+shape is correct for M5's known-complete date range; the discipline
+rule — *dimensions are independent of fact coverage* — is captured now
+for when the next project needs it.
+
+---
+
+## Per-model verification SQL files
+
+A pattern established in Phase 1 (`01_phase1_load_verification.sql`)
+and extended every layer since. Each non-trivial model gets its own
+re-runnable verification file under `sql/verify/`. Phase 4 session 3
+added two:
+
+- `sql/verify/04_phase4_int_sales_with_prices_verification.sql`
+- `sql/verify/05_phase4_dim_calendar_verification.sql`
+
+### The pattern
+
+Each file follows the same shape:
+
+1. **Header comment** explaining what the file verifies and that
+   sections are independent.
+2. **Numbered sections.** Each section is a single SELECT that
+   returns one or more rows of evidence. Section order roughly
+   matches "biggest impact / fastest triage first."
+3. **A single-row PASS/FAIL rollup** as the final section. CTE-based,
+   one CASE per check, one row of `PASS` / `FAIL` / `WARN` strings.
+   Eyeball it in two seconds after any `dbt build`.
+
+### How they complement `dbt test`
+
+`dbt test` runs the schema-YAML generic tests (uniqueness, not-null,
+compound keys). Build-time assertions. **The verify files cover what
+generic tests can't:**
+
+- **Distribution sanity** — is the weekend rate ~28.6% as expected?
+  Is the NULL-price rate ~35% as the M5 product-lifecycle reasoning
+  predicted, not 99%?
+- **Cross-model parity** — does `int_sales_with_prices` row count
+  match `stg_m5_sales_train`? (Catches join fan-out and silent drops.)
+- **Business-logic anomalies** — are there any rows with
+  `units_sold > 0 AND sell_price IS NULL`? (Captures the LEFT-JOIN
+  semantic argument as an enforceable check.)
+- **Eyeball samples** — five rows on known dates, ten rows showing
+  the revenue calc. Quick human verification that the numbers look
+  right.
+
+### Why they're durable artefacts
+
+- **Version controlled.** Lives in git, reviewable, re-runnable
+  against any future state of the warehouse.
+- **Re-runnable on demand.** Snowsight → open file → highlight section
+  → run. No dbt invocation needed.
+- **Self-documenting.** The section comments explain what each check
+  asserts and why. Future-me re-reads and understands the model's
+  contract without re-deriving it.
+- **Interview-ready evidence.** "How do you validate a dbt model
+  past the built-in tests?" → "Per-model SQL file with PASS/FAIL
+  rollup. Here's one — `05_phase4_dim_calendar_verification.sql`."
+
+For Phase 4 session 3: `04_...verification.sql` Section 5 returns
+PASS / PASS (parity + anomaly). `05_...verification.sql` Section 4
+returns PASS / PASS (uniqueness + weekend rate 28.64% inside the
+27–30% band).
+
+---
+
 ## Sections to add as Phase 4 progresses
 
-- Intermediate layer — business-logic joins assembling the
-  sales-with-prices view.
-- Warehouse layer — Kimball star schema, surrogate keys via
-  `dbt_utils.generate_surrogate_key`, incremental fact build strategy.
-- `dbt_utils` package — install + first uses (compound-key uniqueness
-  tests, surrogate keys).
+- `dim_item` and `dim_store` — same surrogate-key pattern, source-truth
+  derivations, larger row counts.
+- `fact_daily_sales` — first incremental model. Partitioning strategy,
+  unique-key config, the `is_incremental()` Jinja conditional.
 - Marts layer — one pre-aggregated mart per Power BI page.
 - `dbt build` orchestration through Airflow (Phase 4 closeout).
 

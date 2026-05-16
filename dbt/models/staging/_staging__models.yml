@@ -19,6 +19,13 @@ models:
 
   - name: stg_m5_sell_prices
     description: "Staging view for weekly sell prices. One row per store × item × fiscal week."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - store_id
+              - item_id
+              - wm_yr_wk
     columns:
       - name: store_id
         description: "Store identifier."
