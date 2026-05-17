@@ -13,7 +13,7 @@
 | Stage | Status | Notes |
 |---|---|---|
 | Project #1 — CDC NT Transport (dbt-first analytics project) | ✅ Done | Reference: `C:\dbt\cdc_nt_gtfs\` |
-| **Project #2 — Retail Demand & Forecasting Pipeline** (this repo) | 🏗 In progress | Headline: orchestration |
+| **Project #2 — Retail Demand & Forecasting Pipeline** (this repo) | 🏗 In progress — Phase 4 closed (Airflow + dbt via Cosmos), Phase 5 (Power BI) next | Headline: orchestration |
 | Project #3 — financial markets / lakehouse | 📋 Planned | API ingestion, lakehouse/medallion architecture |
 | **Post-Project #3 — 6-week Python deep dive** | 📋 Planned | See below |
 | Subsequent projects | 🤔 TBD | Depends on job search outcome and direction |

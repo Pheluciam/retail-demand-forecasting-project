@@ -687,6 +687,73 @@ Tool for defining and running multi-container Docker applications via a YAML fil
 
 **In this project:** `airflow/docker-compose.yml` defines four services — postgres, airflow-init, airflow-webserver, airflow-scheduler.
 
+### **Astronomer Cosmos** `[Project 2]`
+
+An open-source Apache Airflow provider package (`astronomer-cosmos` on PyPI) that integrates dbt projects with Airflow. At DAG-parse time, Cosmos reads the dbt project's manifest, walks the `ref()` dependency graph, and **generates one Airflow task per dbt model plus one per dbt test**, with dependencies wired automatically. The Airflow Graph view ends up showing the dbt DAG directly; a single failing model surfaces in the Airflow UI as a single red task with a link to its dbt logs.
+
+**In this project:** Range-pinned at `astronomer-cosmos>=1.7,<2.0` in `airflow/requirements-airflow.txt`. Used in `airflow/dags/m5_daily_extract.py` via the `DbtTaskGroup` construct to generate 18 dbt tasks (9 models × `run` + `test`) automatically. 13 lines of Cosmos config replaced what would have been ~150 lines of hand-wired BashOperator tasks.
+
+**Why it matters:** Per-model task generation gives you observability that monolithic `BashOperator dbt build` can't. Failures surface at the exact model in the Airflow UI rather than as one opaque red square. The dbt project remains the single source of truth — Airflow tasks regenerate themselves on every DAG-parse cycle.
+
+### **`DbtTaskGroup`** `[Project 2]`
+
+The Cosmos class used inside an Airflow `@dag` function to create a TaskGroup populated with auto-generated dbt tasks. Takes three config primitives: `ProjectConfig` (where the dbt project lives), `ProfileConfig` (how to authenticate), `ExecutionConfig` (which dbt binary to invoke).
+
+**In this project:** Instantiated once in `m5_daily_extract.py` after the existing `verify_one_day` task. Wired into the DAG with `extract_one_day() >> verify_one_day() >> dbt_models >> verify_dbt_one_day()`.
+
+**Why it matters:** Imports from `cosmos.airflow.task_group` (the submodule path) rather than `cosmos` (the top-level package). Cosmos uses `__getattr__`-based lazy imports at the package level, which Pylance can't statically resolve — importing from submodule paths gives clean IDE diagnostics with identical runtime behaviour.
+
+### **Cosmos `ProjectConfig` / `ProfileConfig` / `ExecutionConfig`** `[Project 2]`
+
+The three config classes that tell Cosmos how to find and run a dbt project:
+
+- **`ProjectConfig(project_path)`** — where the dbt project lives on disk (e.g. `/opt/airflow/dbt`).
+- **`ProfileConfig(profile_name, target_name, profiles_yml_filepath=...)`** — how to authenticate. Two modes: pointing at an existing `profiles.yml` (this project's choice — same `env_var()` → `.env` resolution path that runs when invoking dbt manually) or translating an Airflow Connection via a `profile_mapping` (the "real shop" pattern when secrets live in Airflow).
+- **`ExecutionConfig(dbt_executable_path=...)`** — which dbt binary to invoke. This project points it at `/opt/airflow/dbt_venv/bin/dbt` — an isolated venv baked into the Airflow Docker image so dbt's pinned deps don't conflict with Airflow's constraints file.
+
+**Why it matters:** These three configs are the minimum viable Cosmos setup. The same shape works across Airflow + Cosmos + any dbt adapter (Snowflake, Postgres, BigQuery, etc.).
+
+### **`logical_date` vs `data_interval_start` vs `ds`** `[Project 2]`
+
+Airflow's three closely-related-but-distinct timestamp concepts. Easy to confuse; the off-by-one between them trips up almost everyone:
+
+- **`logical_date`** (formerly `execution_date`) — the timestamp the DAG run is scheduled at. For `@daily` schedule, this is the END of the data interval, not the start.
+- **`data_interval_start`** — the start of the data period the run is supposed to process.
+- **`data_interval_end`** — the end of that period, equal to `logical_date`.
+- **`{{ ds }}` template** — `data_interval_start.strftime('%Y-%m-%d')` — the date string most task code actually uses.
+
+**In this project:** Triggering Logical Date `2014-03-22 00:00:00` produces `ds = "2014-03-21"`. The DAG actually processes 2014-03-21's data. Caught during the end-to-end trigger test in Phase 4 session 6.
+
+**Why it matters:** When manually triggering a DAG for "data date X," you need to set Logical Date to `X + 1` for the data interval to align. Or use a DAG that explicitly works in terms of `data_interval_start` and ignores `logical_date` for processing logic.
+
+### **`trigger_rule`**
+
+An Airflow task attribute controlling when the task runs relative to its upstream tasks' states. Defaults to `all_success` — "only run if all direct upstream tasks succeeded." Other values include `all_failed`, `all_done` (run regardless), `one_success` (run if any upstream succeeded), `none_failed`.
+
+**In this project:** Every task uses the default `all_success`. This gives fail-fast chains: if `dbt_models` fails, `verify_dbt_one_day` is marked `upstream_failed` and never runs — no broken-data verification fires.
+
+**Why it matters:** `trigger_rule="all_done"` is useful for cleanup tasks (always run, even after pipeline failure — e.g., releasing a lock, sending a notification). `one_success` is useful for branching patterns ("whichever data source we managed to load, continue").
+
+### **`upstream_failed`** (task state) `[Project 2]`
+
+An Airflow task state distinct from `failed`. A task is marked `upstream_failed` when an upstream task in its dependency chain failed AND the task's `trigger_rule="all_success"` (the default). The task **never executes** — duration `00:00:00`, no logs from the task body itself.
+
+**In this project:** Demonstrated by the failure-injection test. Broke the mart's `active_store_count` test → `dbt_models` task group went red → `verify_dbt_one_day` went `upstream_failed` (orange, not red) → DAG run failed overall. Confirmed `Duration: 00:00:00` in the Airflow UI tooltip.
+
+**Why it matters:** Distinguishes "the task ran and failed" from "the task never got to run because something upstream broke." Useful when debugging — `failed` requires looking at the task's logs; `upstream_failed` requires looking at the upstream task's logs.
+
+### **`test_behavior`** (Cosmos) `[Project 2]`
+
+A Cosmos `RenderConfig` parameter controlling how dbt tests are organised in the auto-generated Airflow task graph:
+
+- **`AFTER_EACH`** (default) — each dbt model becomes a sub-TaskGroup containing a `run` task and a `test` task that fires immediately after. Tests halt dependent models cleanly.
+- **`AFTER_ALL`** — all models run first, then all tests run as a separate group at the end.
+- **`BUILD`** — combines run + test into a single `dbt build --select <model>` task per model.
+
+**In this project:** Default `AFTER_EACH` is used — gives 9 model sub-TaskGroups, each with 2 sub-tasks (run + test) = 18 Airflow tasks inside the `dbt_models` group. Tests fire immediately so downstream models can't build on top of just-failed upstream data.
+
+**Why it matters:** Choice has real consequences for fail-fast behaviour. `AFTER_ALL` runs all transformations even when an early test would have caught a problem; `AFTER_EACH` stops the chain at the first broken model.
+
 ---
 
 ## 7. Azure SQL & Cloud Concepts

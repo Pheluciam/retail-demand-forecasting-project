@@ -358,6 +358,71 @@ Our `docker-compose.yml` **already uses the new name** (`AIRFLOW__DATABASE__SQL_
 
 **Carry-forward.** Leave it alone. The warning will disappear when we upgrade to Airflow 3.x or whenever upstream cleans up the internal reference. Logged here so that future-me sees the warning, recognises it, and moves on without spending time chasing a non-issue.
 
+### 2026-05-17 — Astronomer Cosmos: per-model task generation for dbt (Phase 4 session 6)
+
+The headline session-6 work. Replaced what would have been a `BashOperator` shelling out to `dbt build` with a `DbtTaskGroup` from `astronomer-cosmos`. At DAG-parse time, Cosmos reads the dbt project's manifest, walks `ref()` dependencies, and **generates one Airflow task per dbt model + one per dbt test**, with the Airflow Graph view showing the dbt DAG directly. 13 lines of Cosmos config replaced what would have been ~150 lines of hand-wired BashOperator tasks and dependency wiring.
+
+**Three pieces of installation surface:**
+
+1. `astronomer-cosmos>=1.7,<2.0` in `airflow/requirements-airflow.txt` — Cosmos itself, range-pinned because Cosmos ships breaking changes between major versions.
+2. Separate Python venv inside the Dockerfile at `/opt/airflow/dbt_venv` with `dbt-core==1.11.10 dbt-snowflake==1.11.5` — isolated from Airflow's pinned deps to avoid `jinja2` / `pyyaml` conflicts. Astronomer's documented recommended pattern.
+3. `../dbt:/opt/airflow/dbt:ro` mount in `docker-compose.yml` — read-only window for Cosmos to read the dbt project files at DAG-parse time. Same pattern as the existing `../scripts:/opt/airflow/scripts:ro` mount from Phase 3.
+
+**Cosmos default `test_behavior=AFTER_EACH`**: each dbt model becomes a sub-TaskGroup containing a `run` task (DbtRunLocalOperator) and a `test` task (DbtTestLocalOperator) that fires immediately after the model. Failing tests halt dependent models cleanly. Alternatives (`AFTER_ALL`, `BUILD`) are configurable via `RenderConfig` but `AFTER_EACH` is the right default for fail-fast pipelines.
+
+**Carry-forward**: per-model task generation as the default for any future dbt + orchestrator combo (Dagster's dbt assets, Prefect's `prefect-dbt`, Argo, etc.). Single source of truth (the dbt project) beats duplicate maintenance across two task lists.
+
+### 2026-05-17 — Cosmos lazy imports + the submodule workaround for Pylance
+
+The natural import `from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, ExecutionConfig` worked at runtime in the Airflow worker but triggered Pylance errors locally: *"Object of type object is not callable. Attribute __call__ is unknown."* Cause: Cosmos's `cosmos/__init__.py` uses **lazy imports via `__getattr__`** for memory and startup-time reasons — the class names aren't statically present in the namespace; they're loaded dynamically on first access. Pylance can't follow `__getattr__` magic and degrades the unresolved names to bare `object`, producing the "not callable" diagnostic.
+
+**Fix**: import each class from its actual submodule path:
+
+```python
+from cosmos.airflow.task_group import DbtTaskGroup
+from cosmos.config import ExecutionConfig, ProfileConfig, ProjectConfig
+```
+
+Runtime behaviour is identical (Python loads the same classes either way), but Pylance can statically resolve the submodule paths. Clean diagnostics, zero `# type: ignore` suppression. Confirmed by reading `cosmos/__init__.py` directly: a `_LAZY_IMPORTS: dict[str, str]` declares the mapping from public names to their submodule paths.
+
+**Carry-forward**: when Pylance reports "Object of type object is not callable" on a third-party class import, suspect lazy imports / `__getattr__` magic. Read the package's `__init__.py` to find the actual submodule path and import from there.
+
+### 2026-05-17 — Airflow data_interval semantics: logical_date vs ds
+
+Got tripped during the end-to-end manual trigger. Set Logical Date to `2014-03-22 00:00:00` in the trigger form; the run actually processed data for **2014-03-21**, not 2014-03-22. Quick reference:
+
+| Field | What it means |
+|---|---|
+| `logical_date` | The END of the data interval (formerly "execution_date") |
+| `data_interval_start` | Start of the data period the run processes |
+| `data_interval_end` | End of the data period (= `logical_date`) |
+| `{{ ds }}` template | `data_interval_start.strftime('%Y-%m-%d')` |
+
+For `@daily` schedule, triggering `logical_date = X` processes data for the previous day (`X − 1`). Easy to miss for manual triggers because the form labels the field "Logical Date" without explaining the off-by-one relative to the data actually being processed.
+
+**Carry-forward**: when triggering a DAG manually for "data date X," set the Logical Date to `X + 1`. Or design the DAG with task code that explicitly uses `data_interval_start` rather than relying on a `ds` template that could be misread.
+
+### 2026-05-17 — Airflow task states: `upstream_failed` vs `failed`
+
+Demonstrated cleanly during the failure-injection test. When `dbt_models` went red (a model's test failed), the downstream `verify_dbt_one_day` task did **not** turn red — it turned **orange / upstream_failed**. Key distinction:
+
+- `failed` = the task executed and failed (raised an exception, exited non-zero, etc.)
+- `upstream_failed` = the task **never executed**; an upstream task in the dependency chain failed, and the task's `trigger_rule="all_success"` (the default) means "only run if all upstream succeeded"
+
+The tooltip on the upstream_failed task confirmed: `Duration: 00:00:00`, `Trigger Rule: all_success`. The task was skipped without firing, which is exactly what fail-fast pipelines want — no broken-data verifications running on top of a broken dbt build.
+
+**Other `trigger_rule` values worth knowing**:
+
+| Rule | Behaviour |
+|---|---|
+| `all_success` (default) | Run only if all direct upstream tasks succeeded |
+| `all_failed` | Run only if all direct upstream tasks failed |
+| `all_done` | Run regardless of upstream state (success, failed, or skipped) |
+| `one_success` | Run if any upstream succeeded |
+| `none_failed` | Run if no upstream failed (success or skipped) |
+
+`all_done` is useful for cleanup tasks (always run, even after pipeline failure). `one_success` is useful for "any one of these branches has the data we need" patterns. For verify-gate tasks like `verify_dbt_one_day`, the default `all_success` is exactly right.
+
 ### dbt (advanced from Project #1)
 
 **Installing dbt-snowflake alongside the Phase 3 `--no-deps` Airflow stub (2026-05-15, Phase 4 session 1)**
@@ -805,6 +870,69 @@ Four idioms applied in `mart_executive_overview` worth knowing for any future ma
 
 **Carry-forward to Project #3:** when adding any aggregation layer above a nullable measure, ask "what does NULL at the aggregate level mean for the downstream consumer?" — if the answer is "they'd be confused or take a wrong action," codify `not_null` at the aggregate level even if the source column allows NULL.
 
+### 2026-05-17 — dbt-core and adapter version pinning (1.8+ decoupling)
+
+First attempt to pin both `dbt-core` and `dbt-snowflake` to `1.11.5` in the Airflow image's dbt venv failed with `pip ResolutionImpossible`:
+
+```
+The user requested dbt-core==1.11.5
+dbt-snowflake 1.11.5 depends on dbt-core<2.0 and >=1.11.6
+```
+
+**Root cause**: since the **dbt 1.8 release**, dbt-core and the adapters (`dbt-snowflake`, `dbt-postgres`, `dbt-bigquery`, etc.) ship on **independent patch cycles**. The version numbers between core and adapter don't have to match; in this case the adapter explicitly requires a newer patch than its own version number.
+
+**Fix**: pin both exactly, but to different patches:
+
+```
+dbt-core==1.11.10 dbt-snowflake==1.11.5
+```
+
+`dbt-core==1.11.10` is the latest 1.11.x patch and was what pip resolved to on its own when only the adapter was pinned (without an explicit dbt-core pin). Documented in the Dockerfile comment so future engineers reading the repo understand why the numbers diverge.
+
+**Carry-forward**: when pinning dbt versions, don't assume `1.X.Y` adapter requires `1.X.Y` core. Check the adapter's PyPI metadata (or `setup.py`) for its `dbt-core` requirement range, then pin accordingly. Document the divergence inline so a future reader doesn't waste time wondering why the numbers don't match.
+
+### 2026-05-17 — Incremental fact backfill limitation in `is_incremental()` patterns
+
+Caught at trigger time during end-to-end testing. The first manual trigger (logical_date `2014-01-05`, processing date `2014-01-04`) failed at `verify_dbt_one_day` with the fact and mart showing 0 rows for the run date. Diagnosis:
+
+The fact uses the standard incremental pattern:
+
+```sql
+{{ config(materialized='incremental', unique_key='sale_key') }}
+
+SELECT ... FROM {{ ref('int_sales_with_prices') }}
+{% if is_incremental() %}
+WHERE sale_date > (SELECT MAX(sale_date) FROM {{ this }})
+{% endif %}
+```
+
+The fact's current `MAX(sale_date) = 2014-03-21` (from the session 4 initial build). When staging data for 2014-01-04 (the `ds` for logical_date 2014-01-05 in `@daily` semantics) flowed through the new build, the WHERE clause `sale_date > '2014-03-21'` excluded it — the MERGE inserted 0 new rows for 2014-01-04, and the mart aggregating from the fact also got 0 rows for that date.
+
+**The structural lesson**: `WHERE sale_date > MAX(sale_date)` patterns **extend forward only**. They cannot **backfill** historical dates within the existing range. Two ways to handle backfill use cases:
+
+1. `dbt run --full-refresh --select fact_daily_sales` — rebuilds the whole fact from scratch (expensive for large facts but correct).
+2. A date-window incremental variant: `WHERE sale_date BETWEEN {{ var('start_date') }} AND {{ var('end_date') }}` — allows targeted backfill of a specific window via `dbt run --vars '{start_date: 2014-01-01, end_date: 2014-01-31}'`.
+
+For our test trigger, the practical fix was to pick a date **after** the current fact max (logical_date 2014-03-23 → ds 2014-03-22 → incremental filter accepts it). For real backfill scenarios, the full-refresh path is what we'd use.
+
+**Carry-forward**: design the incremental's WHERE clause around the actual use case. Forward-only is fine for "extract today, add tomorrow" patterns; date-window is required if you ever need to backfill arbitrary historical dates without a full refresh. Document the choice in the model's header comment so future maintainers understand the design intent.
+
+### 2026-05-17 — Failure injection as a validation technique
+
+To prove the four-task chain halts cleanly on a dbt test failure, deliberately broke the mart's `active_store_count` `accepted_range` test (flipped `max_value: 10` → `5`). Triggered a fresh run for a new logical date. Observed exactly the predicted behaviour:
+
+- `extract_one_day` → green
+- `verify_one_day` → green
+- `dbt_models` task group → 8 model `run` + `test` pairs green, then `mart_executive_overview.test` → **red** (the broken test fired across essentially every row of the rebuilt mart and failed). Task group status: red overall.
+- `verify_dbt_one_day` → **upstream_failed**, duration `00:00:00`, never executed
+- Overall DAG run → failed
+
+Reverted the YAML edit post-test so the project state is clean.
+
+**Why this works as a testing pattern**: a temporary YAML flip is **fully reversible** (no DDL changes, no orphaned data) and exercises the failure-handling code paths in the orchestrator. The success path was already proven in the prior run (2014-03-22 → all four task squares green), so the asymmetric pair "happy path passes, then break one test → confirm chain halts" demonstrates both directions cleanly. Clean revert is part of the technique — never commit a broken-test YAML.
+
+**Carry-forward**: use failure injection as a closing validation step whenever wiring up an orchestration chain. Flip one value, trigger, observe the clean halt, revert. Especially valuable for portfolio purposes because it produces a credible "yes, the failure path actually works" screenshot pair.
+
 ### Power BI (advanced from Project #1)
 
 _(to be populated during Phase 5 — explicit DAX measures, cross-page slicers,
@@ -898,6 +1026,32 @@ engine = create_engine(
 2. When grepping for test counts manually, search separately for `^[[:space:]]+-[[:space:]]+(unique|not_null)` (built-in column tests) AND for namespaced tests (`unique_combination_of_columns`, `accepted_range`, `relationships`) which can sit at column OR model level.
 
 Caught by the phase-boundary structural audit on its second explicit application — paid for itself again.
+
+### 2026-05-17 — Conflated Airflow page-level vs panel-level trash icons → deleted entire DAG history
+
+**Symptom:** Tried to delete a single failed DAG run (the 2014-01-05 manual trigger that hit the incremental backfill limitation) by clicking the red trash icon in the top-right of the DAG page. Instead of deleting just the one run, the entire DAG disappeared from the DAG list. All run history wiped.
+
+**Diagnosis:** Airflow's UI has **multiple trash icons at different scope levels** in different parts of the screen, and they look identical (small red trash can):
+
+| Trash location | What it deletes |
+|---|---|
+| Top-right of the DAG page (next to play button, under user avatar) | **The entire DAG** — all runs, all task instances, all history |
+| Inside the side panel when a Run is selected | Just that one DAG run |
+| Inside the side panel when a Task is selected | Just that one task instance |
+
+Claude conflated the page-level (top-right) trash with the panel-level (side panel) trash when guiding through the housekeeping step. Should have specified the panel-level location explicitly.
+
+**Fix:** None needed for the actual code or data — the DAG **file** on disk (`airflow/dags/m5_daily_extract.py`) was untouched. Airflow only deleted the metadata-DB records. The scheduler re-parsed the DAG file on its next sweep (~30 seconds) and the DAG reappeared with zero history. Snowflake data also untouched.
+
+**What was lost:** the run-history records from Phase 3 sessions (extract_one_day successes, the verify-caught-silent-failure episodes from session 2). The Grid view's coloured history bars no longer show those runs. Cosmetic loss — the lessons themselves survive in PROJECT_CONTEXT, in LEARNINGS, and in screenshots taken during the sessions.
+
+**What this taught me:**
+
+1. **Airflow's UI uses scope-sensitive icons.** Same icon (trash can) means different things depending on which part of the screen it's in and what's currently selected. When in doubt, click into the side panel first (select a specific Run or Task) and use the buttons there.
+2. **For deleting individual runs cleanly**, the safer path is: select the run in side panel → use "Mark Failed" (closes out retries, marks the run failed) rather than the trash icon. The trash is for permanent metadata removal.
+3. **For documentation / portfolio purposes**, leaving a failed run in history is often fine — the red square is meaningful evidence that "verify caught a problem." Only delete if cleanliness matters more than evidence.
+
+**Carry-forward**: when guiding through any UI action, name the EXACT screen region the button is in, not just the button shape. "Red trash in the top-right corner" is ambiguous; "red trash inside the side panel that appears when you click on a Run" is unambiguous. This is a teaching-discipline lesson as much as an Airflow lesson.
 
 ---
 
@@ -1058,7 +1212,22 @@ If the source can't filter cheaply by your partition key (no index, or the colum
 > Project #1 was manual. Project #2's headline is orchestration. This section
 > captures the orchestration design and lessons learned implementing it.
 
-_(to be populated during Phase 3)_
+The Project #2 orchestration story builds in two stages:
+
+**Phase 3 (sessions 1-2): Airflow stack stood up; first DAG fires extract + verify.** Custom Airflow image extends `apache/airflow:2.10.3-python3.11` with the Microsoft ODBC driver and a minimal `requirements-airflow.txt` (pyodbc, python-dotenv, snowflake-connector-python). Postgres metadata DB, LocalExecutor, three Airflow services (init, webserver, scheduler) via docker-compose. The first DAG (`m5_daily_extract`) wraps the existing `scripts/extract_azure_to_snowflake.py` as a single @task at `@daily` cadence, with a downstream `verify_one_day` @task that independently queries Snowflake to confirm rows landed. Caught a real silent failure on its first auto-fire (no M5 data for 2026-05-15; verify went red within 10 minutes of deployment).
+
+**Phase 4 session 6: dbt orchestration wired in via Astronomer Cosmos.** The two-task chain becomes a four-stage chain: `extract_one_day → verify_one_day → [dbt_models task group, 18 auto-generated tasks] → verify_dbt_one_day`. Cosmos reads the dbt project at DAG-parse time and generates one Airflow task per dbt model + per test; the Graph view shows the dbt DAG directly. Failure injection test confirmed the chain halts cleanly on dbt test failure (upstream_failed propagation, no broken-data verifications fire downstream).
+
+**The headline number**: 13 lines of Cosmos config in the DAG replace what would have been ~150 lines of hand-wired `BashOperator` tasks. Single source of truth (the dbt project), automatic regeneration at every DAG-parse, per-model lineage in the Airflow UI.
+
+**The headline talk-track**: *"end-to-end pipeline on a schedule, with proper failure handling, tests, and per-model lineage visibility. A broken dbt test halts the chain at exactly that task, the downstream verify never fires on broken data, and the Airflow UI tells me which model in which layer broke without grepping logs."*
+
+**Carry-forward principles for Project #3**:
+
+1. Always run a downstream "verify" task immediately after a load / transform task. Don't trust the task's own success report — independently query the destination and confirm row counts at the layer being written. This caught a real silent failure on its first day of operation in Project #2.
+2. Per-model task generation > monolithic shell-out for orchestrating dbt under any scheduler. Cosmos for Airflow; Dagster's dbt assets for Dagster; `prefect-dbt` for Prefect. The portfolio screenshot of "Airflow Graph view showing my dbt DAG directly" is the headline visual that recruiters respond to.
+3. Failure-injection tests as closing validation of every orchestration chain. Flip one value, trigger, observe the clean halt, revert. Produces a credible "yes, the failure path actually works" demonstration.
+4. Keep one credential surface (the project-root `.env`) shared between local development and the deployed container env, via `env_var()` in profiles.yml and `env_file:` in docker-compose. One source of truth for secrets, two execution environments.
 
 ---
 

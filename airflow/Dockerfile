@@ -83,3 +83,22 @@ ENV CONSTRAINTS_URL="https://raw.githubusercontent.com/apache/airflow/constraint
 
 COPY airflow/requirements-airflow.txt /tmp/requirements-airflow.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt --constraint "${CONSTRAINTS_URL}"
+
+# -----------------------------------------------------------------------------
+# dbt venv -- isolated install of dbt-snowflake.
+# -----------------------------------------------------------------------------
+# dbt's pinned shared dependencies (jinja2, pyyaml, etc.) conflict with
+# Airflow's constraints file. Installing dbt in the main env either breaks
+# the build or silently downgrades something Airflow needs. Solution:
+# a separate Python venv at /opt/airflow/dbt_venv. Cosmos points at it via
+# ExecutionConfig(dbt_executable_path=...) in the DAG -- Astronomer's
+# documented recommendation.
+#
+# Both dbt-core and dbt-snowflake exact-pinned. The version numbers
+# diverge on purpose: dbt-core lives on an independent patch cycle since
+# the 1.8 adapter decoupling, and dbt-snowflake 1.11.5 requires
+# dbt-core>=1.11.6. We pin dbt-core to the latest 1.11.x patch (1.11.10)
+# and dbt-snowflake to 1.11.5 -- a supported and tested combination.
+# Bump both in lockstep with project-wide upgrades.
+RUN python -m venv /opt/airflow/dbt_venv \
+    && /opt/airflow/dbt_venv/bin/pip install --no-cache-dir dbt-core==1.11.10 dbt-snowflake==1.11.5

@@ -37,7 +37,12 @@ snowflake-connector-python[pandas]>=3.0.0
 # Phase 4 — dbt transformations
 # -----------------------------------------------------------------------------
 
-# dbt Snowflake adapter — pulls in dbt-core as a transitive dependency, so
-# one install lands both the templating engine and the Snowflake driver.
-# Provides the `dbt` CLI: dbt run / dbt build / dbt test / dbt docs.
-dbt-snowflake>=1.11.0
+# dbt Snowflake adapter + dbt-core, both exact-pinned for lockstep across
+# local .venv and the Airflow container's isolated dbt_venv. The version
+# numbers diverge on purpose: dbt-core and the adapters have shipped on
+# independent patch cycles since the dbt 1.8 decoupling, and dbt-snowflake
+# 1.11.5 requires dbt-core>=1.11.6. We pin dbt-core to the latest 1.11.x
+# patch (1.11.10) and dbt-snowflake to 1.11.5. The Airflow image uses the
+# same pair in airflow/Dockerfile — bump both files in lockstep on upgrade.
+dbt-core==1.11.10
+dbt-snowflake==1.11.5

@@ -3,10 +3,10 @@
 > Companion to `EXTRACT_PIPELINE.md`. This doc explains the dbt project that
 > transforms RAW Snowflake data into the analytical layers that power Power BI.
 >
-> Last updated: 2026-05-17 (Phase 4 session 5 closed — marts layer opened
-> with `mart_executive_overview` under the lean-marts pattern; warehouse
-> star exposed to Power BI directly, marts only for pre-aggregations that
-> earn their keep).
+> Last updated: 2026-05-17 (Phase 4 session 6 closed — Airflow ↔ dbt
+> integration via Astronomer Cosmos; `m5_daily_extract` DAG extended from
+> 2 tasks to 4 with per-model dbt task generation; failure-injection test
+> confirmed clean chain halt at upstream test failure).
 
 ---
 
@@ -88,7 +88,7 @@ config-version: 2
 
 - `name` — the dbt project's internal handle. snake_case. Must match the
   top-level key under `models:` further down the file.
-- `version` — semantic version of *this dbt project* (not dbt itself).
+- `version` — semantic version of _this dbt project_ (not dbt itself).
   Bumped manually when models change shape.
 - `config-version: 2` — schema version of this YAML file. Always `2` for
   any modern dbt project. Locked since dbt 0.21.
@@ -99,7 +99,7 @@ config-version: 2
 profile: "retail_demand_forecasting"
 ```
 
-This is a *reference*. dbt looks for a top-level key called
+This is a _reference_. dbt looks for a top-level key called
 `retail_demand_forecasting` in `profiles.yml` to find the Snowflake
 credentials. `dbt_project.yml` says **what** to do; `profiles.yml` says
 **where** to connect.
@@ -107,27 +107,27 @@ credentials. `dbt_project.yml` says **what** to do; `profiles.yml` says
 ### Folder paths
 
 ```yaml
-model-paths:    ["models"]
-seed-paths:     ["seeds"]
-test-paths:     ["tests"]
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
 analysis-paths: ["analyses"]
-macro-paths:    ["macros"]
+macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 ```
 
 All six are dbt defaults — listed explicitly so the file shows the whole
 shape of a dbt project at a glance. The square brackets are YAML's inline
-list syntax; each setting *could* take multiple folders, but we only use
+list syntax; each setting _could_ take multiple folders, but we only use
 one each.
 
-| Path | Folder | What goes there |
-|---|---|---|
-| `model-paths` | `models/` | The actual SELECT statements (`.sql` model files) |
-| `seed-paths` | `seeds/` | Reference CSVs that `dbt seed` loads as small lookup tables |
-| `test-paths` | `tests/` | Singular SQL tests — standalone queries that return 0 rows on pass |
-| `analysis-paths` | `analyses/` | Ad-hoc investigative SQL; compiled but not run |
-| `macro-paths` | `macros/` | Reusable Jinja macros — SQL "functions" |
-| `snapshot-paths` | `snapshots/` | SCD Type 2 snapshot definitions for slowly-changing dimensions |
+| Path             | Folder       | What goes there                                                    |
+| ---------------- | ------------ | ------------------------------------------------------------------ |
+| `model-paths`    | `models/`    | The actual SELECT statements (`.sql` model files)                  |
+| `seed-paths`     | `seeds/`     | Reference CSVs that `dbt seed` loads as small lookup tables        |
+| `test-paths`     | `tests/`     | Singular SQL tests — standalone queries that return 0 rows on pass |
+| `analysis-paths` | `analyses/`  | Ad-hoc investigative SQL; compiled but not run                     |
+| `macro-paths`    | `macros/`    | Reusable Jinja macros — SQL "functions"                            |
+| `snapshot-paths` | `snapshots/` | SCD Type 2 snapshot definitions for slowly-changing dimensions     |
 
 ### Runtime artefacts
 
@@ -168,12 +168,12 @@ sub-folder of `staging/`.
 
 **Layer-by-layer reasoning:**
 
-| Layer | Materialization | Why |
-|---|---|---|
-| Staging | `view` | Cheap, always fresh, no storage cost. Re-runs against RAW on every query. |
-| Intermediate | `view` | Same reasoning as staging. Light cost, always reflects upstream state. |
-| Warehouse | `table` (override `fact_*` to `incremental`) | Dims are small enough to rebuild every run; facts are too large — incremental only inserts new rows. |
-| Marts | `table` | Power BI queries these — needs to be fast. Rebuilt on every dbt run. |
+| Layer        | Materialization                              | Why                                                                                                  |
+| ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Staging      | `view`                                       | Cheap, always fresh, no storage cost. Re-runs against RAW on every query.                            |
+| Intermediate | `view`                                       | Same reasoning as staging. Light cost, always reflects upstream state.                               |
+| Warehouse    | `table` (override `fact_*` to `incremental`) | Dims are small enough to rebuild every run; facts are too large — incremental only inserts new rows. |
+| Marts        | `table`                                      | Power BI queries these — needs to be fast. Rebuilt on every dbt run.                                 |
 
 ---
 
@@ -181,7 +181,7 @@ sub-folder of `staging/`.
 
 dbt finds connection details by looking up the `profile:` key from
 `dbt_project.yml` inside `profiles.yml`. The two-file split is deliberate:
-`dbt_project.yml` says *what* to do; `profiles.yml` says *where* to connect.
+`dbt_project.yml` says _what_ to do; `profiles.yml` says _where_ to connect.
 
 ### File location
 
@@ -206,7 +206,7 @@ environment at run time using dbt's Jinja `env_var()` function:
 password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
 ```
 
-The shell environment is populated from `.env` *before* running dbt. This
+The shell environment is populated from `.env` _before_ running dbt. This
 means:
 
 - `profiles.yml` is safe to commit (no secrets in it).
@@ -435,20 +435,20 @@ arrive with the `dbt_utils` package later.
 
 Eight tests at the end of step 3, fourteen at the end of step 4:
 
-| Model | Column | Tests |
-|---|---|---|
-| `stg_m5_calendar` | `calendar_date` | `unique`, `not_null` |
-| `stg_m5_calendar` | `d` | `unique`, `not_null` |
-| `stg_m5_sell_prices` | `store_id` | `not_null` |
-| `stg_m5_sell_prices` | `item_id` | `not_null` |
-| `stg_m5_sell_prices` | `wm_yr_wk` | `not_null` |
-| `stg_m5_sell_prices` | `sell_price` | `not_null` |
-| `stg_m5_sales_train` | `id` | `not_null` |
-| `stg_m5_sales_train` | `item_id` | `not_null` |
-| `stg_m5_sales_train` | `store_id` | `not_null` |
-| `stg_m5_sales_train` | `d` | `not_null` |
-| `stg_m5_sales_train` | `sale_date` | `not_null` ← join sentinel |
-| `stg_m5_sales_train` | `units_sold` | `not_null` |
+| Model                | Column          | Tests                      |
+| -------------------- | --------------- | -------------------------- |
+| `stg_m5_calendar`    | `calendar_date` | `unique`, `not_null`       |
+| `stg_m5_calendar`    | `d`             | `unique`, `not_null`       |
+| `stg_m5_sell_prices` | `store_id`      | `not_null`                 |
+| `stg_m5_sell_prices` | `item_id`       | `not_null`                 |
+| `stg_m5_sell_prices` | `wm_yr_wk`      | `not_null`                 |
+| `stg_m5_sell_prices` | `sell_price`    | `not_null`                 |
+| `stg_m5_sales_train` | `id`            | `not_null`                 |
+| `stg_m5_sales_train` | `item_id`       | `not_null`                 |
+| `stg_m5_sales_train` | `store_id`      | `not_null`                 |
+| `stg_m5_sales_train` | `d`             | `not_null`                 |
+| `stg_m5_sales_train` | `sale_date`     | `not_null` ← join sentinel |
+| `stg_m5_sales_train` | `units_sold`    | `not_null`                 |
 
 `sell_prices` has no single-column uniqueness — its natural key is the
 compound `(store_id, item_id, wm_yr_wk)`. Compound-key uniqueness needs
@@ -480,7 +480,7 @@ Snowflake's ownership model handles the rest — when the role creates
 `STAGING`, it becomes the owner, with full privileges inside.
 
 **Diagnostic discipline used:** ran `SHOW GRANTS TO ROLE RETAIL_ENGINEER`
-*before* granting anything, confirmed the gap was a single missing
+_before_ granting anything, confirmed the gap was a single missing
 privilege, granted exactly that, re-ran `SHOW GRANTS` to verify the new
 row appeared. Avoided the trap of "throw more grants and hope."
 
@@ -548,7 +548,7 @@ Idempotent — safe to re-run.
 
 ### `package-lock.yml` — auto-generated, committed
 
-`dbt deps` writes `dbt/package-lock.yml` recording the *exact* version
+`dbt deps` writes `dbt/package-lock.yml` recording the _exact_ version
 that resolved (here, `dbt_utils 1.3.3`). Same role as `package-lock.json`
 or `Pipfile.lock` — guarantees reproducible installs across machines
 and CI even if a 1.3.4 ships tomorrow. **Commit it.**
@@ -675,13 +675,13 @@ SELECT * FROM joined
 
 ### What each CTE does
 
-| CTE | Role |
-|---|---|
-| `sales` | Pull from `stg_m5_sales_train`. One row per (item, store, day). |
-| `prices` | Pull from `stg_m5_sell_prices`. One row per (store, item, fiscal week). |
-| `calendar` | Slim projection — just the columns needed for the join (`d` → `wm_yr_wk`). |
-| `sales_with_week` | Attach `wm_yr_wk` to every sale via LEFT JOIN on `d`. Bridge step. |
-| `joined` | LEFT JOIN to prices, compute `revenue_amount_usd`. The business-logic step. |
+| CTE               | Role                                                                        |
+| ----------------- | --------------------------------------------------------------------------- |
+| `sales`           | Pull from `stg_m5_sales_train`. One row per (item, store, day).             |
+| `prices`          | Pull from `stg_m5_sell_prices`. One row per (store, item, fiscal week).     |
+| `calendar`        | Slim projection — just the columns needed for the join (`d` → `wm_yr_wk`).  |
+| `sales_with_week` | Attach `wm_yr_wk` to every sale via LEFT JOIN on `d`. Bridge step.          |
+| `joined`          | LEFT JOIN to prices, compute `revenue_amount_usd`. The business-logic step. |
 
 ### Why two LEFT JOINs
 
@@ -695,7 +695,7 @@ Kept as LEFT JOIN for consistency with the next step.
 **34.66% of sales rows have no matching price** — M5 only carries
 `sell_prices` rows for actively-stocked items. INNER JOIN would silently
 drop 11.4M rows. LEFT JOIN preserves them with NULL price. Verified
-that *none* of those priceless rows have positive units sold (anomaly
+that _none_ of those priceless rows have positive units sold (anomaly
 check in the verify file) — they're legitimate "product not on shelf"
 rows, useful demand signal, intentionally kept.
 
@@ -719,16 +719,16 @@ both `sell_price` and `revenue_amount_usd` — those NULLs are by design.
 Schema YAML at `dbt/models/intermediate/_intermediate__models.yml`.
 Eight tests total:
 
-| Test | Column(s) | Why |
-|---|---|---|
-| `dbt_utils.unique_combination_of_columns` | `(store_id, item_id, sale_date)` | Confirms no fan-out from the join. |
-| `not_null` | `id` | Sales-side PK component. |
-| `not_null` | `item_id` | Sales-side PK component. |
-| `not_null` | `store_id` | Sales-side PK component. |
-| `not_null` | `d` | Sales-side PK component. |
-| `not_null` | `sale_date` | Inherited from staging join sentinel. |
-| `not_null` | `wm_yr_wk` | Calendar bridge — NULL here would mean calendar miss. |
-| `not_null` | `units_sold` | Sales fact. |
+| Test                                      | Column(s)                        | Why                                                   |
+| ----------------------------------------- | -------------------------------- | ----------------------------------------------------- |
+| `dbt_utils.unique_combination_of_columns` | `(store_id, item_id, sale_date)` | Confirms no fan-out from the join.                    |
+| `not_null`                                | `id`                             | Sales-side PK component.                              |
+| `not_null`                                | `item_id`                        | Sales-side PK component.                              |
+| `not_null`                                | `store_id`                       | Sales-side PK component.                              |
+| `not_null`                                | `d`                              | Sales-side PK component.                              |
+| `not_null`                                | `sale_date`                      | Inherited from staging join sentinel.                 |
+| `not_null`                                | `wm_yr_wk`                       | Calendar bridge — NULL here would mean calendar miss. |
+| `not_null`                                | `units_sold`                     | Sales fact.                                           |
 
 `dbt build --select int_sales_with_prices` → PASS=9 (1 view + 8 tests).
 
@@ -752,12 +752,12 @@ models:
 
 ### View vs table — the economics
 
-| Aspect | View | Table |
-|---|---|---|
-| Storage cost | None — just a saved SELECT | Pays per byte stored |
-| Query cost | Recomputes the SELECT every query | Reads pre-built storage |
-| Freshness vs upstream | Always reflects current upstream | Stale until next `dbt run` |
-| Best for | Staging, intermediate (light compute, freshness matters) | Warehouse + marts (read-many, latency matters) |
+| Aspect                | View                                                     | Table                                          |
+| --------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| Storage cost          | None — just a saved SELECT                               | Pays per byte stored                           |
+| Query cost            | Recomputes the SELECT every query                        | Reads pre-built storage                        |
+| Freshness vs upstream | Always reflects current upstream                         | Stale until next `dbt run`                     |
+| Best for              | Staging, intermediate (light compute, freshness matters) | Warehouse + marts (read-many, latency matters) |
 
 **Why warehouse defaults to table.** Power BI and downstream consumers
 hit these models thousands of times. A view-on-view-on-view stack
@@ -857,7 +857,7 @@ WEEKISO(calendar_date)              AS week_of_year,
 
 **Why.** Single source of truth. If M5's `weekday` ever disagrees with
 Snowflake's `DAYNAME` for any date, we'd want to know — but more
-importantly, *the dim's own values become the canonical reference*.
+importantly, _the dim's own values become the canonical reference_.
 Downstream analysts pulling from `dim_calendar` aren't accidentally
 inheriting M5's particular weekday convention.
 
@@ -925,7 +925,7 @@ Standard pattern uses `dbt_utils.date_spine()` to generate the spine,
 then LEFT JOINs source attributes (`event_name_*`, `wm_yr_wk`, SNAP
 flags) onto it. **Flagged for Phase 6 polish or Project 3.** Current
 shape is correct for M5's known-complete date range; the discipline
-rule — *dimensions are independent of fact coverage* — is captured now
+rule — _dimensions are independent of fact coverage_ — is captured now
 for when the next project needs it.
 
 ---
@@ -1303,12 +1303,13 @@ First targeted build (`dbt build --select fact_daily_sales`):
 
 Subsequent full-DAG `dbt build --no-partial-parse`: **15.26 seconds**
 end-to-end across the whole project (1 incremental + 3 tables + 4 views
-+ 58 tests). The incremental's `is_incremental()` evaluated to "no new
-dates beyond 2014-03-21" → MERGE found zero new rows → near-instant
-re-validation. The three dims re-materialised fully (table
-materialisations drop + recreate) but they're 3k / 10 / 1k rows. Views
-are query definitions, not materialisations. Tests dominate the runtime
-budget.
+
+- 58 tests). The incremental's `is_incremental()` evaluated to "no new
+  dates beyond 2014-03-21" → MERGE found zero new rows → near-instant
+  re-validation. The three dims re-materialised fully (table
+  materialisations drop + recreate) but they're 3k / 10 / 1k rows. Views
+  are query definitions, not materialisations. Tests dominate the runtime
+  budget.
 
 ### Verification
 
@@ -1443,13 +1444,13 @@ because Snowflake can resolve it in a single pass.
 
 Ten tests in `_marts__models.yml`:
 
-| Column | Tests |
-|---|---|
-| `sale_date` | `unique` + `not_null` (PK enforcement) |
-| `total_units_sold` | `not_null` + `accepted_range >= 0` |
-| `total_revenue_usd` | `not_null` + `accepted_range >= 0` |
-| `active_item_count` | `not_null` + `accepted_range 0..3049` |
-| `active_store_count` | `not_null` + `accepted_range 0..10` |
+| Column               | Tests                                  |
+| -------------------- | -------------------------------------- |
+| `sale_date`          | `unique` + `not_null` (PK enforcement) |
+| `total_units_sold`   | `not_null` + `accepted_range >= 0`     |
+| `total_revenue_usd`  | `not_null` + `accepted_range >= 0`     |
+| `active_item_count`  | `not_null` + `accepted_range 0..3049`  |
+| `active_store_count` | `not_null` + `accepted_range 0..10`    |
 
 Two design calls worth flagging.
 
@@ -1483,9 +1484,9 @@ rows of work plus its 10 tests.
 **Aggregation compression: 32,898,710 → 1,079 rows = ~30,500× reduction.**
 Power BI reads 1,079 rows instead of 33M. A material change to home-page
 refresh time and the storage that lives in Power BI's in-memory model.
-Worth carrying for the interview talk-track: *"I pre-aggregated 32.9M
+Worth carrying for the interview talk-track: _"I pre-aggregated 32.9M
 fact rows down to a 1,079-row daily summary, a ~30,500× compression that
-makes the dashboard home page instant in Power BI."*
+makes the dashboard home page instant in Power BI."_
 
 ### Verification
 
@@ -1493,14 +1494,14 @@ makes the dashboard home page instant in Power BI."*
 durable verification artefact, 6 numbered sections + single-row PASS/FAIL
 rollup. Follows the same pattern as `05_` through `08_`.
 
-| Section | What it asserts |
-|---|---|
-| 1 | Upstream parity: mart's `SUM(total_units_sold)` and `SUM(total_revenue_usd)` equal the fact's corresponding aggregates; mart's `COUNT(DISTINCT sale_date)` equals the fact's |
-| 2 | PK uniqueness: `COUNT(*)` = `COUNT(DISTINCT sale_date)` (Snowsight-side re-confirmation of the dbt test) |
-| 3 | Active counts reconcile: re-compute the `CASE`-inside-`COUNT(DISTINCT)` values from the fact for one sample date (2013-06-15) and confirm parity |
-| 4 | Headline measure sanity: full-mart totals + date range + row count, verifying $93,559,341.40 total revenue carries through |
-| 5 | Five-row eyeball: five evenly-spaced dates with all measures, see-it-yourself check |
-| 6 | Single-row PASS/FAIL rollup: 4-column health check across `units_parity` / `revenue_parity` / `pk_unique` / `active_store_max` |
+| Section | What it asserts                                                                                                                                                              |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | Upstream parity: mart's `SUM(total_units_sold)` and `SUM(total_revenue_usd)` equal the fact's corresponding aggregates; mart's `COUNT(DISTINCT sale_date)` equals the fact's |
+| 2       | PK uniqueness: `COUNT(*)` = `COUNT(DISTINCT sale_date)` (Snowsight-side re-confirmation of the dbt test)                                                                     |
+| 3       | Active counts reconcile: re-compute the `CASE`-inside-`COUNT(DISTINCT)` values from the fact for one sample date (2013-06-15) and confirm parity                             |
+| 4       | Headline measure sanity: full-mart totals + date range + row count, verifying $93,559,341.40 total revenue carries through                                                   |
+| 5       | Five-row eyeball: five evenly-spaced dates with all measures, see-it-yourself check                                                                                          |
+| 6       | Single-row PASS/FAIL rollup: 4-column health check across `units_parity` / `revenue_parity` / `pk_unique` / `active_store_max`                                               |
 
 First-run results (session 5): §1 → 3 rows of mart = fact parity (units
 34,437,817; revenue $93,559,341.40; date_count 1,079); §2 → 1,079 = 1,079
@@ -1510,11 +1511,399 @@ $93,559,341.40 confirmed; §5 → five rows all positive, `active_store_count`
 
 ---
 
-## Sections to add (Phase 4 closeout)
+## Airflow orchestration of dbt — Astronomer Cosmos integration
 
-- `dbt build` orchestration through Airflow — the Phase 4 → Phase 5
-  bridge: an Airflow task that runs `dbt build` after each daily extract
-  lands, so the warehouse + mart stay fresh without manual intervention.
+Phase 4 session 6 extended the existing `m5_daily_extract` Airflow DAG so
+that dbt runs automatically after each successful daily extract. Each dbt
+model becomes its own Airflow task with full per-model lineage in the
+Airflow UI, via the Astronomer Cosmos provider package. This section walks
+through what Cosmos is, why it was chosen, and exactly how the integration
+sits across the Dockerfile, the docker-compose volume mounts, and the DAG
+file itself.
+
+### What Cosmos does (and why not BashOperator or hand-wiring)
+
+Cosmos is an Airflow provider that reads a dbt project's manifest at
+DAG-parse time and **generates one Airflow task per dbt model + one per
+dbt test**, with dependencies mirrored from dbt's own `ref()` graph. The
+result: the Airflow UI's Graph view shows the dbt DAG directly, and a
+single failing model surfaces in Airflow as a single red task square with
+a link to its dbt logs.
+
+Three alternatives were considered:
+
+1. **Defer dbt orchestration to Project #3.** Cheaper in the near term but
+   leaves the headline DE deliverable (_end-to-end orchestrated pipeline_)
+   only half-built. Rejected.
+2. **One `BashOperator` that shells out to `dbt build`.** Simplest possible.
+   One opaque task fires green or red with no per-model visibility — if a
+   model breaks, you can't tell which one from the Airflow UI; you have to
+   open the logs and read the dbt output. Functional but doesn't impress.
+3. **Hand-wire one `BashOperator` per dbt model.** Workable but maintains
+   the model list in two places (dbt project + Airflow DAG). Every new
+   model, rename, or rewire requires updating both. Two sources of truth
+   that have to be kept in sync.
+
+Cosmos wins on the third axis specifically: **automation plus single source
+of truth**. The dbt project is the only place where models and their
+dependencies are declared; Cosmos regenerates the Airflow tasks at every
+DAG-parse cycle. Add a new dbt model, restart Airflow, the new task appears.
+
+For the targeted role-shape (BI Analyst / DE-adjacent in Melbourne), Cosmos
+is also the integration approach real shops use in 2025-26 — showing it in
+a portfolio repo signals current-tooling fluency.
+
+### The four-task chain — DAG anatomy
+
+Before session 6, `m5_daily_extract` had 2 tasks:
+
+```
+extract_one_day → verify_one_day
+```
+
+After session 6, the same DAG has 4 stages:
+
+```
+extract_one_day → verify_one_day → [dbt_models task group] → verify_dbt_one_day
+```
+
+| Task                 | Purpose                                                            | Pattern                                                                         |
+| -------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `extract_one_day`    | Pull one day's M5 slice from Azure SQL into `RETAIL_DB.RAW`        | Existing @task; wraps `scripts/extract_azure_to_snowflake.py`                   |
+| `verify_one_day`     | Cross-check Snowflake-side that the extract landed                 | Existing @task; 3 row-count checks in one round-trip                            |
+| `dbt_models`         | Run all 9 dbt models + 9 model-level test tasks                    | New: Cosmos `DbtTaskGroup` (auto-generated)                                     |
+| `verify_dbt_one_day` | Cross-check Snowflake-side that the dbt build populated all layers | New @task; 9 row-count checks across STAGING / INTERMEDIATE / WAREHOUSE / MARTS |
+
+Each task uses Airflow's default `trigger_rule="all_success"`, so the chain
+halts cleanly on the first failure — a broken dbt test sets `dbt_models`
+to red and `verify_dbt_one_day` to `upstream_failed` (never executes). The
+overall DAG run is marked failed.
+
+### Three pieces of installation surface
+
+Cosmos is wired into the running Airflow stack via three changes — one to
+the Python image's pip layer, one to the Dockerfile's structure, and one
+to docker-compose's volume mounts.
+
+**1. `astronomer-cosmos` itself goes into the main Airflow venv.**
+A single line added to `airflow/requirements-airflow.txt`:
+
+```
+astronomer-cosmos>=1.7,<2.0
+```
+
+The range pin is a departure from the file's existing no-pin convention
+(documented in the comment above the line). Cosmos has independent semver
+and ships breaking changes between major versions; without a pin, a future
+`2.0.0` release would silently land in the image on rebuild and could
+break the DAG. Same range-pin shape `dbt/packages.yml` uses for
+`dbt_utils`.
+
+**2. dbt-snowflake gets its own isolated venv inside the image.**
+A new stage at the bottom of `airflow/Dockerfile`:
+
+```dockerfile
+RUN python -m venv /opt/airflow/dbt_venv \
+    && /opt/airflow/dbt_venv/bin/pip install --no-cache-dir \
+       dbt-core==1.11.10 dbt-snowflake==1.11.5
+```
+
+Why a separate venv: dbt's pinned shared dependencies (`jinja2`, `pyyaml`,
+etc.) conflict with Airflow's constraints file. Installing dbt in the
+main env would either fail the build or silently downgrade something
+Airflow needs. Astronomer's documented recommendation. Cosmos shells out
+to `/opt/airflow/dbt_venv/bin/dbt` via `ExecutionConfig(dbt_executable_path=...)`
+at DAG-time.
+
+**3. The dbt project becomes visible to the worker via a bind mount.**
+A single line added to `airflow/docker-compose.yml` under the shared
+`x-airflow-common.volumes`:
+
+```yaml
+- ../dbt:/opt/airflow/dbt:ro
+```
+
+`:ro` (read-only) because nothing inside the container should ever
+rewrite the dbt models — those are version-controlled on the host. Same
+pattern as the existing `../scripts:/opt/airflow/scripts:ro` mount from
+Phase 3. The mount sits inside the shared YAML anchor, so all three
+Airflow services (init, webserver, scheduler) automatically see it.
+
+### Cosmos config block — ProjectConfig, ProfileConfig, ExecutionConfig
+
+The four config primitives live at module level in `airflow/dags/m5_daily_extract.py`,
+declared once and reused inside the DAG function:
+
+```python
+DBT_PROJECT_PATH = "/opt/airflow/dbt"
+DBT_EXECUTABLE_PATH = "/opt/airflow/dbt_venv/bin/dbt"
+
+project_config = ProjectConfig(DBT_PROJECT_PATH)
+profile_config = ProfileConfig(
+    profile_name="retail_demand_forecasting",
+    target_name="dev",
+    profiles_yml_filepath=f"{DBT_PROJECT_PATH}/profiles.yml",
+)
+execution_config = ExecutionConfig(
+    dbt_executable_path=DBT_EXECUTABLE_PATH,
+)
+```
+
+- **`ProjectConfig`** — tells Cosmos _where_ the dbt project lives on disk.
+- **`ProfileConfig`** — tells Cosmos _how_ to authenticate. Two flavours:
+  Airflow connection translation (the "real shop" pattern) or pointing at
+  the existing `profiles.yml`. This project uses the latter so both
+  execution environments (manual PowerShell `dbt build` + Airflow runs)
+  share the same `env_var()` → `.env` resolution path. One credential
+  surface, two execution paths.
+- **`ExecutionConfig`** — tells Cosmos _which_ dbt binary to invoke. Points
+  at the isolated venv from the Dockerfile.
+
+The `profile_name="retail_demand_forecasting"` and `target_name="dev"`
+strings must match exactly what's in `dbt/profiles.yml` (top-level key
+and the `target:` value respectively). Mismatch → Cosmos fails to
+authenticate at parse-time.
+
+### The `DbtTaskGroup` instantiation — 13 lines that replace 150
+
+Inside the `@dag` function, after the existing `extract_one_day` and
+`verify_one_day` @task definitions:
+
+```python
+dbt_models = DbtTaskGroup(
+    group_id="dbt_models",
+    project_config=project_config,
+    profile_config=profile_config,
+    execution_config=execution_config,
+    default_args={"retries": 2},
+)
+
+extract_one_day() >> verify_one_day() >> dbt_models >> verify_dbt_one_day()
+```
+
+These 13 lines (the `DbtTaskGroup` instantiation + the wiring) replace
+what would otherwise be:
+
+- 9 `BashOperator` task definitions, one per dbt model (~80 lines)
+- 9 more `BashOperator` task definitions for `dbt test --select <model>` (~80 lines)
+- All the `>>` dependency wiring between them, mirroring `ref()` calls (~15 lines)
+- A maintenance burden of keeping all of that in sync with the dbt project by hand
+
+So: ~150 lines of brittle, hand-maintained Airflow code → 13 lines of
+Cosmos config that regenerates from dbt's own truth on every DAG-parse.
+
+### Cosmos's default `test_behavior=AFTER_EACH`
+
+The Airflow Graph view, when `dbt_models` is expanded, shows each dbt
+model as a tiny sub-TaskGroup containing two sub-tasks:
+
+- A `run` task (instance of `DbtRunLocalOperator`) — shells out to
+  `dbt run --select <model_name>`
+- A `test` task (instance of `DbtTestLocalOperator`) — shells out to
+  `dbt test --select <model_name>` immediately after the model builds
+
+This is Cosmos's default `test_behavior=AFTER_EACH`: each model's tests
+fire immediately after that model itself succeeds, halting dependent
+models cleanly on test failure. The alternatives (`AFTER_ALL` — all
+models run first, then all tests as a separate group; `BUILD` — combine
+run + test into a single `dbt build --select <model>` task) are both
+configurable via `RenderConfig`, but `AFTER_EACH` is the right default
+for our case: it stops a downstream model from building on top of
+upstream data that just failed validation.
+
+The task count math: 9 dbt models × 2 Airflow tasks each = **18
+auto-generated tasks** inside the `dbt_models` group. The 78 dbt test
+_assertions_ (the YAML `unique` + `not_null` + `accepted_range` +
+`relationships` checks across all layers) all run inside the 9
+model-level `test` tasks, with each task running its model's assertions
+sequentially and reporting pass/fail at the model level. Cleaner UI than
+78 individual test squares would have been.
+
+### Import paths — the lazy-imports workaround
+
+The natural import statement at the top of the DAG file:
+
+```python
+from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, ExecutionConfig
+```
+
+…compiled and ran cleanly in the Airflow worker but triggered Pylance
+errors (`Object of type object is not callable. Attribute __call__ is
+unknown`) in the local IDE. The cause: Cosmos's `cosmos/__init__.py`
+uses **lazy imports via `__getattr__`** for memory-saving reasons —
+the names `DbtTaskGroup`, `ProjectConfig`, etc. aren't statically present
+in the `cosmos` namespace at static-analysis time; they're loaded
+dynamically on first access. Pylance can't follow that pattern and
+degrades the unknown names to bare `object`, producing the "not
+callable" diagnostic.
+
+Workaround: import each class from its actual submodule path:
+
+```python
+from cosmos.airflow.task_group import DbtTaskGroup
+from cosmos.config import ExecutionConfig, ProfileConfig, ProjectConfig
+```
+
+Runtime behaviour is identical (Python loads the same classes either
+way), but Pylance can statically resolve the submodule paths. Clean
+diagnostics, zero suppression comments.
+
+### dbt-core and adapter version pinning — the 1.8+ decoupling
+
+First install attempt pinned both dbt-core and dbt-snowflake to `1.11.5`
+to match the project's local `.venv`. Build failed with `pip
+ResolutionImpossible`:
+
+```
+The user requested dbt-core==1.11.5
+dbt-snowflake 1.11.5 depends on dbt-core<2.0 and >=1.11.6
+```
+
+Since the dbt 1.8 release, dbt-core and the adapters (`dbt-snowflake`,
+`dbt-postgres`, etc.) have **independent patch release cycles**. The
+two version numbers don't need to match — and in this case the adapter
+explicitly requires a higher patch than its own version number.
+
+Fix: pin both exactly, but to different patches:
+
+```dockerfile
+RUN python -m venv /opt/airflow/dbt_venv \
+    && /opt/airflow/dbt_venv/bin/pip install --no-cache-dir \
+       dbt-core==1.11.10 dbt-snowflake==1.11.5
+```
+
+`dbt-core==1.11.10` is the latest patch in the 1.11.x line and is the
+version pip resolved to on its own when only `dbt-snowflake==1.11.5` was
+pinned. The local `.venv` was already on the same pair (pip resolved
+identically when installed), so no local sync required. Documented in
+the Dockerfile comment above the line so a future engineer reading the
+repo understands why the numbers diverge.
+
+### Airflow data_interval semantics — `logical_date` vs `ds`
+
+A subtle gotcha that fired during the end-to-end trigger test. Airflow
+2.x distinguishes:
+
+- `logical_date` (formerly `execution_date`): the timestamp the run is
+  scheduled at — for an `@daily` schedule, this is the END of the data
+  interval (or the start of the NEXT interval).
+- `data_interval_start`: the start of the data period the run is
+  supposed to process.
+- `ds` template: `data_interval_start` formatted as `YYYY-MM-DD`.
+
+For a DAG with `@daily` schedule and start_date in Melbourne tz:
+
+- Trigger `logical_date = 2014-03-22 00:00:00 Melbourne` (= 2014-03-21
+  13:00 UTC).
+- → `data_interval_start = 2014-03-21 00:00 Melbourne`
+- → `context["ds"] = "2014-03-21"`
+- The extract pulls Azure SQL data for **2014-03-21**, not for 2014-03-22.
+
+Carry-forward: when manually triggering a date X, set logical_date to
+**X + 1 day** to actually process X. The Airflow trigger form's "Logical
+Date" field is one interval ahead of the data being processed. Cosmetic
+but easy to miss; bit us once in this session.
+
+### `verify_dbt_one_day` — Snowflake-side validation of the dbt build
+
+Mirrors the existing `verify_one_day` pattern but checks the dbt output
+layers rather than the RAW extract. Nine row-count checks batched into a
+single SELECT (one warehouse round-trip):
+
+| Layer        | Check                                                | Bound  |
+| ------------ | ---------------------------------------------------- | ------ |
+| STAGING      | `stg_m5_calendar` rows for `run_date`                | `== 1` |
+| STAGING      | `stg_m5_sell_prices` joined to calendar via wm_yr_wk | `> 0`  |
+| STAGING      | `stg_m5_sales_train` rows for `run_date`             | `> 0`  |
+| INTERMEDIATE | `int_sales_with_prices` rows for `run_date`          | `> 0`  |
+| WAREHOUSE    | `dim_calendar` full-table row count                  | `> 0`  |
+| WAREHOUSE    | `dim_item` full-table row count                      | `> 0`  |
+| WAREHOUSE    | `dim_store` full-table row count                     | `> 0`  |
+| WAREHOUSE    | `fact_daily_sales` rows for `run_date`               | `> 0`  |
+| MARTS        | `mart_executive_overview` rows for `run_date`        | `== 1` |
+
+Any failure aggregates into a single `RuntimeError` message that names
+every failing layer + observed vs expected counts — actionable diagnosis
+without grepping logs. Same `failures.append(...)` pattern as
+`verify_one_day`.
+
+### Incremental fact backfill — the gotcha caught at trigger time
+
+The first end-to-end manual trigger (logical_date 2014-01-05) failed at
+`verify_dbt_one_day` with `WAREHOUSE.FACT_DAILY_SALES: expected > 0 rows
+for 2014-01-04, got 0` and the corresponding mart check failing too. The
+fact's existing `MAX(sale_date)` was `2014-03-21` (from the session 4
+build); the incremental WHERE clause `sale_date > MAX(sale_date)` filtered
+out `2014-01-04` (and any other date inside the existing range).
+
+The fix for the test trigger was to pick a date **after** the current
+fact max — `logical_date = 2014-03-23` → `ds = 2014-03-22` → fact's
+incremental filter passes the new date through to MERGE.
+
+The broader lesson is structural: `WHERE sale_date > MAX(sale_date)`
+patterns only **extend forward**; they cannot **backfill** historical
+dates within their existing range. For backfill use cases the answer is
+`dbt run --full-refresh` (rebuilds the whole fact from scratch). Worth
+flagging because the demo-time use of "trigger any historical date" runs
+into this; the @daily-forward use of the same DAG (extract today, add to
+fact tomorrow) does not.
+
+### Failure injection test — confirming the chain halts cleanly
+
+Closing validation of the four-task chain: flipped the mart's
+`active_store_count` `accepted_range` from `max_value: 10` to
+`max_value: 5` in `dbt/models/marts/_marts__models.yml`, triggered a fresh
+manual run, observed the exact behaviour predicted:
+
+- `extract_one_day` → green
+- `verify_one_day` → green
+- `dbt_models` task group → all 9 model `run` tasks green, all 8 upstream
+  model `test` tasks green, then `mart_executive_overview.test` → **red**
+  (the broken `accepted_range` test fired against the rebuilt mart and
+  failed across essentially every row). Task group status: red overall.
+- `verify_dbt_one_day` → **upstream_failed** (state, not failed). Duration
+  `00:00:00`. Trigger rule `all_success` evaluated to "not all upstream
+  succeeded," so the task was marked upstream_failed and never executed.
+- Overall DAG run → failed.
+
+Reverted the YAML edit after the test; the project state is clean and
+the success path (Sept 22) was previously proven green end-to-end. The
+test demonstrates the chain halts at the dbt test failure cleanly,
+without firing the downstream verify task on broken data.
+
+### Build outcomes + interview talk-track
+
+**Headline numbers** (all from this session's end-to-end trigger for
+`2014-03-22`):
+
+- DAG run duration: **5:31** end-to-end (extract + verify + 9 dbt models
+  × 2 tasks each + verify_dbt = 21 tasks total)
+- All 21 task squares green; verify_dbt_one_day's 9 layer checks all pass
+- Cosmos's per-model lineage visible in the Airflow Graph view
+- Failure-injection test produced clean upstream_failed propagation
+
+**Interview talk-track:**
+
+> "I integrated dbt and Airflow via Astronomer Cosmos. Cosmos parses the
+> dbt manifest at DAG-parse time and creates one Airflow task per dbt
+> model + per test — so the Airflow lineage graph shows the dbt model DAG
+> directly, and a failure on a single model surfaces in the Airflow UI as
+> a single red task with a link to its dbt logs. Cleaner observability
+> than wrapping `dbt build` in a single BashOperator. I also wired a
+> downstream `verify_dbt_one_day` task that runs nine row-count checks
+> across the dbt output layers, so we catch silent failures inside the
+> pipeline rather than in a Power BI dashboard the next morning."
+
+### File-change summary (Phase 4 session 6)
+
+| File                               | Change                                                                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `airflow/requirements-airflow.txt` | Added `astronomer-cosmos>=1.7,<2.0`                                                                                                                  |
+| `airflow/Dockerfile`               | New `RUN` stage creates `/opt/airflow/dbt_venv` and installs `dbt-core==1.11.10 + dbt-snowflake==1.11.5`                                             |
+| `airflow/docker-compose.yml`       | Added `../dbt:/opt/airflow/dbt:ro` volume mount                                                                                                      |
+| `airflow/dags/m5_daily_extract.py` | Cosmos imports + module-level config block + `DbtTaskGroup` + `verify_dbt_one_day` @task + wiring update; pre-existing `fetchone()` None-guard added |
+
+The dbt project itself was unchanged — Cosmos reads it as-is.
 
 ---
 

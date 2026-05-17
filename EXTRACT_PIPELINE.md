@@ -188,7 +188,17 @@ One Python call, three under-the-hood operations. Throughput on the
 
 ---
 
-## What's next (Phase 3)
+## What's next (Phase 3 and beyond — already shipped)
+
+> Note (2026-05-17): Phases 3 and 4 are now complete. This section captures
+> the original "what comes next from Phase 2's perspective" framing; for the
+> actual Phase 4 dbt + Airflow Cosmos integration walkthrough, see
+> `DBT_PIPELINE.md` → "Airflow orchestration of dbt — Astronomer Cosmos
+> integration". The `m5_daily_extract` DAG documented below now extends to
+> four stages: `extract_one_day → verify_one_day → [dbt_models task group,
+> 18 auto-generated tasks] → verify_dbt_one_day`.
+
+## What's next (original Phase 3 framing)
 
 The same script becomes a single task in an Airflow DAG, called once per
 scheduled run with `--run-date {{ ds }}`. The two-mode design means

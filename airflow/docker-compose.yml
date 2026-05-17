@@ -72,6 +72,11 @@ x-airflow-common:
     # The existing extract script, read-only inside the container. The DAG
     # imports/invokes it from /opt/airflow/scripts.
     - ../scripts:/opt/airflow/scripts:ro
+    # The dbt project, read-only. Cosmos's DbtTaskGroup parses
+    # dbt_project.yml + models/ at DAG-parse time to create one Airflow
+    # task per dbt model. profiles.yml resolves Snowflake creds via
+    # env_var() against the ../.env env_file: already loaded above.
+    - ../dbt:/opt/airflow/dbt:ro
   # AIRFLOW_UID: on Linux hosts this should match your host user's UID to
   # avoid permission issues on the bind-mounted logs/dags folders. On
   # Windows/Mac with Docker Desktop, the default 50000 (the airflow user

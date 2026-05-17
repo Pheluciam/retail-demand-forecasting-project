@@ -34,6 +34,9 @@ import pendulum
 
 from airflow.decorators import dag, task
 
+from cosmos.airflow.task_group import DbtTaskGroup
+from cosmos.config import ExecutionConfig, ProfileConfig, ProjectConfig
+
 
 # -----------------------------------------------------------------------------
 # Make the existing extract module importable.
@@ -65,11 +68,38 @@ DEFAULT_ARGS = {
 }
 
 
+# -----------------------------------------------------------------------------
+# Cosmos config -- see DBT_PIPELINE.md "Airflow orchestration" for the
+# full walkthrough.
+# -----------------------------------------------------------------------------
+# Paths inside the worker container. DBT_PROJECT_PATH is the read-only mount
+# declared in docker-compose.yml; DBT_EXECUTABLE_PATH is the isolated venv
+# built in the Dockerfile.
+DBT_PROJECT_PATH = "/opt/airflow/dbt"
+DBT_EXECUTABLE_PATH = "/opt/airflow/dbt_venv/bin/dbt"
+
+# ProfileConfig points Cosmos at the existing profiles.yml (rather than
+# translating to an Airflow Connection) -- same env_var() resolution path
+# that runs when invoking dbt manually from PowerShell, so both execution
+# environments share one credential surface.
+project_config = ProjectConfig(DBT_PROJECT_PATH)
+profile_config = ProfileConfig(
+    profile_name="retail_demand_forecasting",
+    target_name="dev",
+    profiles_yml_filepath=f"{DBT_PROJECT_PATH}/profiles.yml",
+)
+execution_config = ExecutionConfig(
+    dbt_executable_path=DBT_EXECUTABLE_PATH,
+)
+
+
 @dag(
     dag_id="m5_daily_extract",
     description=(
-        "Daily incremental extract of one date slice of M5 data from "
-        "Azure SQL into Snowflake RAW."
+        "Daily M5 pipeline: extract one date slice from Azure SQL to "
+        "Snowflake RAW, verify the extract, run dbt to refresh "
+        "STAGING / INTERMEDIATE / WAREHOUSE / MARTS via Cosmos, verify the "
+        "dbt build."
     ),
     # Pendulum DateTime for start_date is Airflow's recommended pattern --
     # explicit timezone, no naive-datetime warnings.
@@ -78,7 +108,7 @@ DEFAULT_ARGS = {
     catchup=False,
     max_active_runs=1,
     default_args=DEFAULT_ARGS,
-    tags=["m5", "extract", "phase3"],
+    tags=["m5", "extract", "dbt", "cosmos"],
 )
 
 def m5_daily_extract():
@@ -174,7 +204,12 @@ def m5_daily_extract():
             cur = conn.cursor()
             try:
                 cur.execute(sql, (run_date, run_date, run_date))
-                calendar_rows, sell_prices_rows, sales_train_rows = cur.fetchone()
+                row = cur.fetchone()
+                if row is None:
+                    raise RuntimeError(
+                        f"verify_one_day: query returned no rows for run_date={run_date}"
+                    )
+                calendar_rows, sell_prices_rows, sales_train_rows = row
             finally:
                 cur.close()
         finally:
@@ -214,7 +249,151 @@ def m5_daily_extract():
             f"sales_train={sales_train_rows}"
         )
 
-    extract_one_day() >> verify_one_day()
+    @task(task_id="verify_dbt_one_day")
+    def verify_dbt_one_day(**context) -> str:
+        """Independent Snowflake-side verification of the dbt task group's work.
+
+        Queries downstream tables across STAGING / INTERMEDIATE / WAREHOUSE /
+        MARTS to confirm rows landed for run_date at every layer. Knows nothing
+        about what the dbt_models task group reported -- if a dbt model returned
+        success but the data didn't actually flow (stale build, partial update,
+        table truncated by a prior failed run, etc.), this catches it. Same
+        philosophy as verify_one_day, but for the dbt pipeline rather than the
+        extract.
+
+        Nine checks batched into a single SELECT for one warehouse round-trip:
+            STAGING:      stg_m5_calendar (==1), stg_m5_sell_prices (>0),
+                          stg_m5_sales_train (>0)
+            INTERMEDIATE: int_sales_with_prices (>0)
+            WAREHOUSE:    dim_calendar (>0), dim_item (>0), dim_store (>0),
+                          fact_daily_sales (>0 for run_date)
+            MARTS:        mart_executive_overview (==1 for run_date)
+
+        Any failure -> RuntimeError -> task failure -> red square in Grid view.
+        """
+        run_date: str = context["ds"]
+        log = logging.getLogger("airflow.task")
+        log.info("verify_dbt_one_day starting for run_date=%s", run_date)
+
+        import extract_azure_to_snowflake as extractor
+
+        # Six positional %s binds for the six date-filtered checks; the three
+        # dim full-table counts don't take a parameter.
+        sql = (
+            "SELECT "
+            "    (SELECT COUNT(*) FROM STAGING.STG_M5_CALENDAR "
+            "        WHERE calendar_date = %s) AS stg_cal_rows, "
+            "    (SELECT COUNT(*) FROM STAGING.STG_M5_SELL_PRICES sp "
+            "        JOIN STAGING.STG_M5_CALENDAR c ON sp.wm_yr_wk = c.wm_yr_wk "
+            "        WHERE c.calendar_date = %s) AS stg_sp_rows, "
+            "    (SELECT COUNT(*) FROM STAGING.STG_M5_SALES_TRAIN "
+            "        WHERE sale_date = %s) AS stg_sales_rows, "
+            "    (SELECT COUNT(*) FROM INTERMEDIATE.INT_SALES_WITH_PRICES "
+            "        WHERE sale_date = %s) AS int_rows, "
+            "    (SELECT COUNT(*) FROM WAREHOUSE.DIM_CALENDAR) AS dim_cal_rows, "
+            "    (SELECT COUNT(*) FROM WAREHOUSE.DIM_ITEM) AS dim_item_rows, "
+            "    (SELECT COUNT(*) FROM WAREHOUSE.DIM_STORE) AS dim_store_rows, "
+            "    (SELECT COUNT(*) FROM WAREHOUSE.FACT_DAILY_SALES "
+            "        WHERE sale_date = %s) AS fact_rows, "
+            "    (SELECT COUNT(*) FROM MARTS.MART_EXECUTIVE_OVERVIEW "
+            "        WHERE sale_date = %s) AS mart_rows"
+        )
+
+        conn = extractor.connect_snowflake()
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(sql, (run_date, run_date, run_date, run_date,
+                                  run_date, run_date))
+                row = cur.fetchone()
+                if row is None:
+                    raise RuntimeError(
+                        f"verify_dbt_one_day: query returned no rows "
+                        f"for run_date={run_date}"
+                    )
+                (stg_cal, stg_sp, stg_sales, int_rows,
+                 dim_cal, dim_item, dim_store, fact_rows, mart_rows) = row
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
+        log.info("  STAGING.STG_M5_CALENDAR rows for %s: %d (expected 1)",
+                 run_date, stg_cal)
+        log.info("  STAGING.STG_M5_SELL_PRICES rows for %s: %d (expected > 0)",
+                 run_date, stg_sp)
+        log.info("  STAGING.STG_M5_SALES_TRAIN rows for %s: %d (expected > 0)",
+                 run_date, stg_sales)
+        log.info("  INTERMEDIATE.INT_SALES_WITH_PRICES rows for %s: %d (expected > 0)",
+                 run_date, int_rows)
+        log.info("  WAREHOUSE.DIM_CALENDAR rows: %d (expected > 0)", dim_cal)
+        log.info("  WAREHOUSE.DIM_ITEM rows: %d (expected > 0)", dim_item)
+        log.info("  WAREHOUSE.DIM_STORE rows: %d (expected > 0)", dim_store)
+        log.info("  WAREHOUSE.FACT_DAILY_SALES rows for %s: %d (expected > 0)",
+                 run_date, fact_rows)
+        log.info("  MARTS.MART_EXECUTIVE_OVERVIEW rows for %s: %d (expected 1)",
+                 run_date, mart_rows)
+
+        failures = []
+        if stg_cal != 1:
+            failures.append(
+                f"STAGING.STG_M5_CALENDAR: expected 1 row for {run_date}, got {stg_cal}"
+            )
+        if stg_sp <= 0:
+            failures.append(
+                f"STAGING.STG_M5_SELL_PRICES: expected > 0 rows for {run_date}, got {stg_sp}"
+            )
+        if stg_sales <= 0:
+            failures.append(
+                f"STAGING.STG_M5_SALES_TRAIN: expected > 0 rows for {run_date}, got {stg_sales}"
+            )
+        if int_rows <= 0:
+            failures.append(
+                f"INTERMEDIATE.INT_SALES_WITH_PRICES: expected > 0 rows for {run_date}, got {int_rows}"
+            )
+        if dim_cal <= 0:
+            failures.append(f"WAREHOUSE.DIM_CALENDAR: expected > 0 rows, got {dim_cal}")
+        if dim_item <= 0:
+            failures.append(f"WAREHOUSE.DIM_ITEM: expected > 0 rows, got {dim_item}")
+        if dim_store <= 0:
+            failures.append(f"WAREHOUSE.DIM_STORE: expected > 0 rows, got {dim_store}")
+        if fact_rows <= 0:
+            failures.append(
+                f"WAREHOUSE.FACT_DAILY_SALES: expected > 0 rows for {run_date}, got {fact_rows}"
+            )
+        if mart_rows != 1:
+            failures.append(
+                f"MARTS.MART_EXECUTIVE_OVERVIEW: expected 1 row for {run_date}, got {mart_rows}"
+            )
+
+        if failures:
+            raise RuntimeError(
+                f"verify_dbt_one_day failed for run_date={run_date}: "
+                + "; ".join(failures)
+            )
+
+        return (
+            f"verified dbt build for {run_date} -- "
+            f"stg(cal={stg_cal}, sp={stg_sp}, sales={stg_sales}), "
+            f"int={int_rows}, "
+            f"dim(cal={dim_cal}, item={dim_item}, store={dim_store}), "
+            f"fact={fact_rows}, mart={mart_rows}"
+        )
+
+    # Cosmos generates one Airflow task per dbt model + one per dbt test,
+    # with dependencies mirrored from dbt's ref() graph. default_args here
+    # overrides the DAG-level retries for tasks inside this group; kept at 2
+    # to match the rest of the DAG. verify_dbt_one_day (defined above) wires
+    # downstream of this group as the final gate.
+    dbt_models = DbtTaskGroup(
+        group_id="dbt_models",
+        project_config=project_config,
+        profile_config=profile_config,
+        execution_config=execution_config,
+        default_args={"retries": 2},
+    )
+
+    extract_one_day() >> verify_one_day() >> dbt_models >> verify_dbt_one_day()
 
 
 # Instantiate the DAG. Airflow's scheduler discovers it via this assignment

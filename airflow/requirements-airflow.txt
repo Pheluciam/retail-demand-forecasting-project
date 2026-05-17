@@ -28,3 +28,10 @@ python-dotenv
 # Snowflake Python connector. [pandas] extra pulls in pyarrow and unlocks
 # snowflake.connector.pandas_tools.write_pandas() for bulk loads.
 snowflake-connector-python[pandas]
+
+# astronomer-cosmos: dbt <-> Airflow integration. Range-pinned (departure
+# from the no-pin pattern above) because Cosmos ships breaking changes
+# between major versions; dbt-snowflake lives in a separate venv in the
+# Dockerfile due to dependency conflicts with Airflow's constraints.
+astronomer-cosmos>=1.7,<2.0
+

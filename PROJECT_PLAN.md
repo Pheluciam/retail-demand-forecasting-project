@@ -207,6 +207,6 @@ To avoid scope creep, these are out:
 
 |                  |                                                                        |
 | ---------------- | ---------------------------------------------------------------------- |
-| **Phase**        | Phase 4 — session 5 closed (marts layer opened with `mart_executive_overview` under the lean-marts pattern); session 6 next (Airflow ↔ dbt wiring via Astronomer Cosmos) |
+| **Phase**        | Phase 4 — **closed** (Airflow ↔ dbt integration via Astronomer Cosmos shipped end-to-end in session 6; DAG extended to 4-stage chain with per-model task generation; failure-injection test confirmed clean chain halt); Phase 5 session 1 next (Power BI dashboard build) |
 | **Last updated** | 2026-05-17                                                             |
 | **Next step**    | See `PROJECT_CONTEXT.md` → "Where we are right now" for the live state |

@@ -2,7 +2,7 @@
 
 > A production-grade retail demand-planning analytics platform built on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 Forecasting) is ingested from Azure SQL Database into Snowflake via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
-**Status:** 🚧 In development — Phase 4 in flight (dbt warehouse layer complete; marts next): full Kimball star schema shipped — `dim_calendar`, `dim_item`, `dim_store`, and incremental `fact_daily_sales` (32.9M rows, $93.5M total revenue, 58 dbt tests, full DAG green in 15.26s). Phases 0–3 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min), Airflow orchestration live with `extract_one_day` → `verify_one_day` task chain catching silent failures inside the DAG. Marts layer (one per Power BI page) next.
+**Status:** 🚧 In development — **Phase 4 closed; Phase 5 (Power BI) next.** End-to-end orchestrated pipeline live: Azure SQL → Snowflake RAW → STAGING / INTERMEDIATE / WAREHOUSE / MARTS via dbt, all running on a single `@daily` Airflow schedule with per-model lineage visibility via **Astronomer Cosmos**. The `m5_daily_extract` DAG now spans 4 stages: `extract_one_day → verify_one_day → [dbt_models task group, 18 auto-generated tasks] → verify_dbt_one_day`. Full Kimball star schema shipped (`dim_calendar`, `dim_item`, `dim_store`, incremental `fact_daily_sales` at 32.9M rows / $93.5M revenue, 78 dbt tests). Lean-marts pattern: `mart_executive_overview` pre-aggregates the fact ~30,500× for the Power BI home page (32.9M → 1,079 rows). Failure-injection test confirmed the chain halts cleanly at any broken dbt test (`upstream_failed` propagation, downstream verify never fires on broken data). End-to-end DAG run for a single date: ~5:31.
 
 ---
 
@@ -11,7 +11,8 @@
 - **End-to-end pipeline** from operational source database to BI dashboard
 - **Cloud warehouse** (Snowflake) and **cloud-hosted source** (Azure SQL Database)
 - **Orchestrated execution** via Apache Airflow (Docker), with independent Snowflake-side verification tasks that catch silent failures inside the DAG
-- **Production-grade dbt** with `dbt_utils`, tests, packages, partitioned incremental fact models, and a dedicated marts layer
+- **Per-model dbt lineage in Airflow** via Astronomer Cosmos — Cosmos parses the dbt project at DAG-parse time and generates one Airflow task per dbt model + per test, so the Airflow Graph view shows the dbt DAG directly and a failing model surfaces as a single red task with a link to its dbt logs
+- **Production-grade dbt** with `dbt_utils`, tests, packages, partitioned incremental fact models, and a lean-marts layer (pre-aggregations where they earn their keep; warehouse star otherwise exposed directly to BI)
 - **Realistic enterprise pattern**: relational source (representing an ERP / Microsoft Dynamics system) → cloud warehouse → BI tool
 - **Five-page Power BI dashboard** covering executive overview, demand by hierarchy, promotion analysis, seasonality, and forecast vs actual
 
@@ -73,7 +74,7 @@ The M5 dataset (~58M rows of daily sales across 30,000 SKUs and 10 stores) is la
 - **`PROJECT_PLAN.md`** — full plan, scope, timeline, locked decisions, risks
 - **`PROJECT_CONTEXT.md`** — current state and immediate next steps
 - **`EXTRACT_PIPELINE.md`** — Phase 2 walkthrough: Azure SQL → Snowflake extract path, design decisions, throughput economics
-- **`DBT_PIPELINE.md`** — Phase 4 walkthrough: dbt project layout, `dbt_project.yml` / `profiles.yml` line-by-line, materialization strategy per layer
+- **`DBT_PIPELINE.md`** — Phase 4 walkthrough: dbt project layout, `dbt_project.yml` / `profiles.yml` line-by-line, materialization strategy per layer, plus the Airflow ↔ dbt integration via Astronomer Cosmos (per-model task generation, four-stage DAG chain, failure-injection validation)
 - **`CODE_QUALITY.md`** — the 10-point code-quality checklist (7 core checks + 3 failsafes) applied to every non-trivial script in this repo, with concrete examples from the codebase
 - **`LEARNINGS.md`** — running journal of lessons learned across the project
 - **`TEACHING_PREFERENCES.md`** — working-style preferences (relevant to AI-assisted development workflow)
