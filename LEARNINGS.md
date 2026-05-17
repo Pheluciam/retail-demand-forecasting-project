@@ -209,16 +209,16 @@ Disk file existing ≠ SQL has been run. The two must be reconciled: write to di
 
 **Custom Airflow image — never reuse the project-root `requirements.txt` (2026-05-14, Phase 3 session 1)**
 
-Two-stage failure during the first build of the custom Airflow image. Worth capturing both stages because each one teaches something separate.
+Two-stage failure during the first build of the custom Airflow image:
 
-- **Stage 1 — no `--constraint` flag, install our `requirements.txt` directly.** Build succeeded. Then the `airflow-init` container immediately crashed at runtime with `sqlalchemy.orm.exc.MappedAnnotationError: Type annotation for "TaskInstance.dag_model" can't be correctly interpreted for Annotated Declarative Table form.` Diagnosis: Airflow 2.10 needs SQLAlchemy **1.4.x**. Our `requirements.txt` has `sqlalchemy>=2.0.0`. pip happily upgraded SQLAlchemy past what Airflow could handle. The base image worked, our pip step broke it.
-- **Stage 2 — same `requirements.txt`, now with `--constraint` pointing at Airflow's official constraints file.** Build failed at the pip step with a dependency-resolution error. Why: the constraint says "SQLAlchemy must be 1.4.x", our requirement says "SQLAlchemy must be ≥ 2.0.0" — pip refuses to resolve a direct conflict rather than silently picking one. So `--constraint` alone wasn't enough; the underlying disagreement between our requirements file and Airflow's needs still had to be fixed.
+- **Stage 1 — no `--constraint` flag, install our `requirements.txt` directly.** Build succeeded; `airflow-init` immediately crashed with `sqlalchemy.orm.exc.MappedAnnotationError: Type annotation for "TaskInstance.dag_model" can't be correctly interpreted...`. Airflow 2.10 needs SQLAlchemy **1.4.x**; our `requirements.txt` has `>=2.0.0`. pip upgraded past what Airflow could handle.
+- **Stage 2 — same `requirements.txt`, now with `--constraint` pointing at Airflow's official constraints file.** Build failed at pip with a dependency-resolution error. Constraint says SQLAlchemy 1.4.x, requirement says ≥ 2.0.0 — pip refuses a direct conflict. `--constraint` alone isn't enough; the underlying disagreement still has to be fixed.
 
-**The fix that worked: separate `airflow/requirements-airflow.txt` with no version pins.** Lists only the extras our extract script needs that aren't already in the Airflow base image (`pyodbc`, `python-dotenv`, `snowflake-connector-python[pandas]`). The `--constraint` flag pointed at `https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt` then chooses tested versions for everything. Build clean, runtime clean.
+**The fix that worked: separate `airflow/requirements-airflow.txt` with no version pins.** Lists only the extras the extract script needs (`pyodbc`, `python-dotenv`, `snowflake-connector-python[pandas]`). `--constraint` pointed at `https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt` chooses tested versions for everything. Build clean, runtime clean.
 
-**General principle for any custom image extending an opinionated base.** Don't blanket-apply your existing pin lists onto an image whose maintainers have already thought hard about compatible versions. List only the *additional* packages you need, leave them unpinned, and let the base image's constraints/lockfile decide versions. Same lesson would apply to a custom `dbt-core` Docker image, a custom Jupyter image, or anything else where you're layering deps onto a curated stack.
+**General principle for any custom image extending an opinionated base.** Don't blanket-apply existing pin lists onto an image whose maintainers have already thought hard about compatible versions. List only the *additional* packages, leave them unpinned, let the base image's constraints decide. Same lesson applies to a custom `dbt-core` image, a custom Jupyter image, anything layering deps onto a curated stack.
 
-**Mistakes & diagnoses carry-forward:** add "look at constraints/lockfile of base image before adding deps" to the Code-Quality checklist as an implicit corollary of criterion 1 (Currency). Also a Project #3 carry-forward — most production Docker images extend an opinionated base.
+**Carry-forward:** add "look at constraints/lockfile of base image before adding deps" to the Code-Quality checklist as a corollary of criterion 1 (Currency). Project #3 carry-forward — most production Docker images extend an opinionated base.
 
 **Docker daemon must be running before `docker compose` (2026-05-14, Phase 3 session 1)**
 
@@ -226,27 +226,27 @@ Trivial-in-hindsight but worth noting because the error message is opaque: `fail
 
 **Code-quality framework gap discovered: dev environment hygiene (2026-05-14, Phase 3 session 1)**
 
-Mid-session, yellow Pylance squigglies appeared on the freshly-written DAG file (`airflow/dags/m5_daily_extract.py`) — `import pendulum`, `from airflow.decorators import dag, task`, `import extract_azure_to_snowflake`. Phil pushed back: shouldn't `CODE_QUALITY.md` have flagged this kind of issue *before* it became a problem?
+Mid-session, yellow Pylance squigglies appeared on the freshly-written DAG file (`airflow/dags/m5_daily_extract.py`) — `import pendulum`, `from airflow.decorators import dag, task`, `import extract_azure_to_snowflake`. Phil pushed back: shouldn't `CODE_QUALITY.md` have flagged this *before* it became a problem?
 
-**Diagnosis.** The lunch audit had been run thoroughly against all nine criteria. But every one of those criteria audits what's *inside* the code — idioms, security, types, idempotency, observability. None audited the *dev environment around* the code — whether the local IDE could fully validate the file before commit. A clean genuine gap in the framework, not a memory miss or audit-execution miss.
+**Diagnosis.** The lunch audit had been thorough — but all nine criteria audit what's *inside* the code (idioms, security, types, idempotency, observability). None audited the *dev environment around* the code. A genuine gap in the framework.
 
-**Fix.** Three coordinated edits, treating this as a process-improvement moment:
+**Fix.** Three coordinated edits:
 
-- **Added criterion 6 to `CODE_QUALITY.md`: "Dev environment hygiene."** Linter warnings zero-tolerance, IDE imports resolve to the same modules the runtime uses, local venv mirrors deployed environment, gaps documented when full local install isn't viable (Windows-incompatible deps, etc.).
-- **Renumbered the rest of the checklist** (existing 6→7, 7→8, 8→9, 9→10) and updated section heading from "six core checks" to "seven core checks."
-- **Mirrored the same change in `TEACHING_PREFERENCES.md`** which carries the abbreviated checklist alongside it — the two stay in sync.
+- Added criterion 6 to `CODE_QUALITY.md`: "Dev environment hygiene." Linter warnings zero-tolerance, IDE imports resolve to the runtime modules, local venv mirrors deployed environment.
+- Renumbered the rest (6→7, 7→8, 8→9, 9→10); "six core checks" → "seven core checks."
+- Mirrored in `TEACHING_PREFERENCES.md`.
 
-**Practical-fix corollary.** While the framework was being updated, the actual yellow squigglies were addressed with the canonical Windows-host workaround:
+**Practical-fix corollary.** Yellow squigglies addressed with the canonical Windows-host workaround:
 
-- `pip install pendulum "apache-airflow==2.10.3" --no-deps` — installs the Airflow package source files into the local venv so Pylance can resolve `airflow.decorators` imports, without dragging in the 100+ Unix-only transitive dependencies that don't work on Windows native.
-- `pyrightconfig.json` at project root with `extraPaths: ["scripts"]` — tells Pylance the DAG's runtime `sys.path.insert(0, "/opt/airflow/scripts")` corresponds to the host's `scripts/` folder, so `import extract_azure_to_snowflake` resolves cleanly.
-- *Truly* professional answer for Windows-host DE work is **VS Code Dev Containers** (editor attaches to the running container; zero drift). Flagged as a Phase 6 polish item — strong interview talking point about progression from pragmatic-now to modern-later.
+- `pip install pendulum "apache-airflow==2.10.3" --no-deps` — installs Airflow source files for Pylance import-resolution without dragging in 100+ Unix-only transitive deps.
+- `pyrightconfig.json` at project root with `extraPaths: ["scripts"]` — maps the DAG's runtime `sys.path.insert(0, "/opt/airflow/scripts")` to the host's `scripts/` folder.
+- *Truly* professional answer is **VS Code Dev Containers** (editor attaches to the running container; zero drift). Flagged as Phase 6 polish — strong interview talking point about progression from pragmatic-now to modern-later.
 
 **What this taught me.**
 
-- A code-quality checklist is a living artefact. Its value is in catching mistakes; the moment a mistake bypasses it, the checklist itself is the artefact to improve. Updating the checklist alongside the fix is the move that pays compounding interest across all future projects.
-- "Code quality" and "dev environment quality" are distinct concerns and both deserve explicit criteria. Conflating them means dev-env issues hide as random IDE complaints rather than being treated as the same class of "drift creates silent bugs" risk that the rest of the checklist guards against.
-- Carry-forward to Project #3: criterion 6 (Dev environment hygiene) starts from day one — pyrightconfig, IDE-resolves-runtime imports, linter-warnings-zero-tolerance baked into Phase 0 scaffolding.
+- A code-quality checklist is a living artefact — when a mistake bypasses it, the checklist is the artefact to improve. Updating alongside the fix pays compounding interest across all future projects.
+- "Code quality" and "dev environment quality" are distinct concerns; both deserve explicit criteria. Conflating them means dev-env issues hide as random IDE complaints rather than being treated as the same silent-bug class.
+- Carry-forward to Project #3: criterion 6 starts day one — pyrightconfig, IDE-resolves-runtime imports, linter-warnings-zero-tolerance baked into Phase 0 scaffolding.
 
 **Airflow 2.x CLI flag is `-e` / `--exec-date`, not `--logical-date` (2026-05-14, Phase 3 session 1)**
 
@@ -317,9 +317,9 @@ ORDER BY e.check_name;
 
 **`verify_one_day` caught a real silent failure on first deploy (2026-05-15, Phase 3 session 2)**
 
-Built `verify_one_day` as a second task in `m5_daily_extract`, downstream of `extract_one_day`. Three Snowflake-side checks (`CALENDAR` = exactly 1 row for run_date, `SELL_PRICES` > 0 rows for the fiscal week containing run_date, `SALES_TRAIN` > 0 rows for the M5 d-code mapping to run_date) batched into a single SQL round-trip with three positional `%s` binds. Doesn't read the extract task's return value or XCom — queries Snowflake fresh. Same philosophy as the files in `sql/verify/`, but the loop closes inside Airflow rather than relying on a manual Snowsight pass.
+Built `verify_one_day` as a second task in `m5_daily_extract`, downstream of `extract_one_day`. Three Snowflake-side checks (`CALENDAR` = 1 row for run_date, `SELL_PRICES` > 0 for the fiscal week, `SALES_TRAIN` > 0 for the d-code) batched into a single SQL round-trip with three positional `%s` binds. Queries Snowflake fresh — doesn't read the extract task's XCom. Closes the loop inside Airflow rather than relying on a manual Snowsight pass.
 
-**The verify task caught a real silent failure within ten minutes of deployment.** While testing the manual `2014-01-03` trigger, the run stuck in `queued` forever. Diagnosis: **paused DAGs don't execute manually-triggered tasks in Airflow 2.x** — the trigger creates the DAG run successfully but the scheduler refuses to process tasks. Unpaused the DAG to clear it. The unpause then auto-fired today's `2026-05-15` slot because `catchup=False` only suppresses *historical backfill*, not the "next scheduled interval." Today's slot extracted data for a date M5 doesn't cover — Azure SQL returned 0 rows, `extract_one_day` finished cleanly with no error, and `verify_one_day` then asked Snowflake "got 1 calendar row for 2026-05-15?", got `0`, raised `RuntimeError`, square went red. **Exactly the silent-failure shape the verify task was designed to catch.**
+**The verify task caught a real silent failure within ten minutes of deployment.** Testing the manual `2014-01-03` trigger, the run stuck in `queued` forever — **paused DAGs don't execute manually-triggered tasks in Airflow 2.x**. Unpausing then auto-fired today's `2026-05-15` slot (because `catchup=False` only suppresses *historical backfill*, not the next scheduled interval). M5 doesn't cover that date — Azure SQL returned 0 rows, `extract_one_day` finished cleanly with no error, and `verify_one_day` queried Snowflake, found 0 calendar rows, raised `RuntimeError`. **Exactly the silent-failure shape the verify task was designed to catch.**
 
 **Lessons.**
 
@@ -791,6 +791,20 @@ Captured for interview / portfolio README closing slides:
 
 These are real numbers from a real pipeline. The 32.9M / $93.5M scale-of-data signal is the kind of detail that elevates a portfolio repo from "I followed a tutorial" to "I built and validated a production-shaped pipeline."
 
+### 2026-05-17 — Mart-layer aggregation patterns
+
+Four idioms applied in `mart_executive_overview` worth knowing for any future mart:
+
+**1. `SUM` semantics on a nullable measure.** ANSI `SUM()` ignores NULLs by default. `revenue_amount_usd` is NULL on ~34.66% of fact rows (M5 product-lifecycle gaps); `SUM(revenue_amount_usd)` skips those and totals only the priced ones. Right semantic — rows with unknown revenue contributing zero beats rows defaulted to `0` and silently understating the day. The interview-friendly version: *"a NULL price means we don't know the revenue, not that the revenue was zero; SUM respects that automatically."*
+
+**2. `CASE`-inside-`COUNT(DISTINCT ...)` for filtered distinct counts.** Cleaner and cheaper than the subquery alternative. The CASE emits the id only when the condition fires (NULL otherwise); `COUNT(DISTINCT ...)` skips NULLs. Snowflake resolves the whole expression in one pass — no subquery, no second scan. Pattern is general and applies wherever "count distinct things matching X" is needed.
+
+**3. `accepted_range` upper bounds tied to dim cardinalities.** `active_item_count` capped at 3,049 (the M5 item count); `active_store_count` capped at 10 (the M5 store count). These caps make a category of grain bug (accidental cross-join, key explosion, fan-out from a botched join) machine-detectable. If the test ever fires, something is fanning out the fact's grain — not a downstream display bug. Cheap insurance.
+
+**4. `not_null` on an aggregate of a nullable column.** Counter-intuitive but correct: `revenue_amount_usd` is nullable at the fact level (correct — M5 lifecycle gaps), but `total_revenue_usd` at the mart level is `not_null`-tested. Reasoning: a NULL daily total would mean every row in the day's fact has NULL price, which is a catastrophic upstream condition — should fire as a test failure, not show as a blank cell in Power BI.
+
+**Carry-forward to Project #3:** when adding any aggregation layer above a nullable measure, ask "what does NULL at the aggregate level mean for the downstream consumer?" — if the answer is "they'd be confused or take a wrong action," codify `not_null` at the aggregate level even if the source column allows NULL.
+
 ### Power BI (advanced from Project #1)
 
 _(to be populated during Phase 5 — explicit DAX measures, cross-page slicers,
@@ -869,6 +883,21 @@ engine = create_engine(
 - When a magic number guards verification, **compute it via two independent routes** (e.g., Python arithmetic AND a `SELECT 30490 * 1941` directly in SQL).
 - Better still — **derive expected values from runtime measurements** rather than hardcoding. The loader could compute `len(df_long)` at melt-time and use that as the verification baseline. Hardcoded magic numbers are a known anti-pattern in test/verification code; this is exactly the failure mode they cause.
 - Carry-forward to Project #3.
+
+### 2026-05-17 — Test-count drift in PROJECT_CONTEXT records
+
+**Symptom:** Predicted full-DAG `dbt build` PASS=77 after shipping the mart. Actual: PASS=78. Off by one.
+
+**Diagnosis:** Worked backwards through the targeted-build output (`mart_executive_overview` shipped 1 model + 10 tests = 11 PASS, correct) and the project totals (69 tests in YAMLs, also correct). The discrepancy traced to the *previous* session's PROJECT_CONTEXT record: session 4 close claimed `fact_daily_sales` shipped with 13 tests and the project total was 58. Actual YAML counts show 14 fact tests and 59 project tests at session-4 close. The eye-balled column-level tally missed the model-level `unique_combination_of_columns` test on the fact (model-level tests are easy to miss when scanning down a list of column-level `data_tests:` blocks).
+
+**Fix:** Corrected the historical record in PROJECT_CONTEXT's session-5 closeout block (notes the 58 → 59 correction in-line). The 78-count is consistent with the corrected baseline (59 + 11 = 70 tests; 8 models + 1 mart = 9; 70 + 9 = wait, off again — actual is 78 = 69 tests + 9 models, so the math is: 58 → 59 at session 4, 59 + 10 = 69 today; total nodes 8 → 9 with the mart; 69 + 9 = 78 ✓).
+
+**What this taught me:** When counting tests on a model, eyeballing the YAML's `data_tests:` blocks **misses model-level tests** that sit at the model's top level rather than under any column. Two reliable disciplines:
+
+1. Run the targeted `dbt build` and read the count off the output line ("Finished running ... N data tests in ..."). The build is ground truth.
+2. When grepping for test counts manually, search separately for `^[[:space:]]+-[[:space:]]+(unique|not_null)` (built-in column tests) AND for namespaced tests (`unique_combination_of_columns`, `accepted_range`, `relationships`) which can sit at column OR model level.
+
+Caught by the phase-boundary structural audit on its second explicit application — paid for itself again.
 
 ---
 
@@ -982,6 +1011,45 @@ If the source can't filter cheaply by your partition key (no index, or the colum
 **Trade-off accepted:** Tiny divergence from Azure SQL shape (one extra column) in exchange for free lineage on every row. The `DEFAULT` means the extract script doesn't need to populate it — Snowflake stamps it on insert. No code complexity.
 
 **Where it pays back:** Phase 3 "did the pipeline run today?" health checks (`SELECT MAX(loaded_at) FROM raw.sales_train`), debugging late-arriving rows, dbt source freshness tests. Standard practice in raw landing layers — cheap to add now, painful to retrofit.
+
+### 2026-05-17 — Lean marts layer + analyst-facing star schema
+
+**Considered:**
+
+- **Wide-mart pattern (original plan).** Five marts, one per Power BI page, each denormalised with date attributes flattened in. Power BI reads what's there. Common in DE-heavy teams where engineers ship the modelling.
+- **Lean-mart pattern.** Expose the warehouse star (fact + conformed dims) directly to Power BI. Build relationships and DAX measures in the BI tool. Marts only where they earn their keep — pre-aggregations for performance, or cross-domain joins that don't belong in any single fact.
+
+**Chosen:** Lean-mart pattern. Start with **one** mart — `mart_executive_overview` — pre-aggregating `fact_daily_sales` (32.9M rows) down to ~1,148 daily summary rows. Add `mart_forecast_vs_actual` later in Phase 5 only when forecasts exist (joins two domains, genuinely earns a mart). Drop the four "thin re-projection" marts (Demand by Hierarchy / Promotion & Price / Seasonality & Calendar / etc.) — Power BI's VertiPaq engine handles those off the star directly, and pre-baking them adds maintenance weight without proportional value.
+
+**Trade-off accepted:** Less pre-baked work in the warehouse means more modelling work in Power BI (relationships, DAX measures, slicer plumbing). That's the intended trade — Phil targets Melbourne BI Analyst / DE-adjacent roles where Power BI fluency matters as much as the pipeline behind it. The leaner shape lets the warehouse demonstrate clean DE patterns *and* leaves real BI work to demo.
+
+**Risk-register revision:** The original "Power BI only ever connects to `marts/` — never raw or warehouse-fact" rule (Project Plan risk register) is **superseded**. New rule: Power BI connects to `WAREHOUSE.fact_*` + `dim_*` for analyst-facing pages, and to `MARTS.mart_*` for pre-aggregated/cross-domain pages. The risk of "Power BI choking on the 32.9M-row fact" is mitigated by VertiPaq's compression — a single XS Snowflake warehouse plus Power BI's in-memory engine handles this size comfortably. Verified empirically before relying on it in Power BI.
+
+**Why this matters for the portfolio:** This is the most-professional architectural default for the role-shape Phil is targeting. The interview talk-track is sharper than "I built five marts because that's what the tutorial said":
+
+> "I exposed the warehouse star directly to Power BI for analyst flexibility. The marts layer holds pre-aggregations only where they genuinely earn their keep — `mart_executive_overview` rolls 32.9M fact rows down to a daily summary for the dashboard home page. Sliceable rollups stay in Power BI's own model where analysts can iterate quickly."
+
+**Carry-forward to Project #3:** When the question "should this go in a mart or a BI tool?" comes up, default to "BI tool" unless the mart earns its keep via (a) pre-aggregation that meaningfully speeds dashboard refresh, (b) cross-domain joins that don't belong in any single fact, or (c) governance/SLA reasons specific to that downstream consumer.
+
+### 2026-05-17 — Extend Airflow DAG with dbt orchestration via Astronomer Cosmos
+
+**Considered:**
+
+- **Defer dbt orchestration to Project #3.** Keep Project #2's Airflow story at "I stood up the stack and wrote a first DAG (extract + verify)." Power BI handles refresh manually. Cheaper in the near term, but the headline DE deliverable (*end-to-end orchestrated pipeline*) is only half-built.
+- **Extend the existing DAG via `BashOperator`.** Add one `dbt_build_one_day` task that shell-runs `dbt build`. Simplest possible. Works but doesn't impress — one opaque task fires either green or red with no per-model visibility.
+- **Extend the existing DAG via Astronomer Cosmos.** Cosmos parses dbt's manifest at DAG-parse time and generates **one Airflow task per dbt model** with full dependency wiring. Each `stg_*` / `int_*` / `dim_*` / `fact_*` / `mart_*` model + its tests becomes its own Airflow task in the UI. The Airflow lineage graph shows the dbt DAG directly. Steeper setup; real-shop pattern.
+
+**Chosen:** Astronomer Cosmos. Phase 4 session 6 (next) extends `m5_daily_extract.py` from 2 tasks to a 4-stage shape: `extract_one_day → verify_one_day → <Cosmos task group for dbt> → verify_dbt_one_day`. Power BI moves one session out to Phase 5.
+
+**Trade-off accepted:** One additional session of work (~2-3 hours) and one new dependency (`astronomer-cosmos` in the Airflow image) in exchange for the headline DE deliverable being real: *the pipeline runs end-to-end on a schedule, with proper failure handling, tests, and per-model lineage visibility*. Without this, Project #2's orchestration story is foundation-only.
+
+**Why this matters for the portfolio:** The Melbourne BI Analyst / DE-adjacent role-shape Phil is targeting weights orchestration heavily — recruiters and hiring managers reading the README want to see the full chain (extract → load → transform → test → publish) wired into a scheduler with proper failure handling. Cosmos is also the integration approach real shops use in 2025 (the dbt Cloud-native and Airflow-native options have largely converged on this pattern), so showing it in a portfolio repo demonstrates current-tooling fluency, not just conceptual understanding.
+
+**Interview talk-track:**
+
+> "I integrated dbt and Airflow via Astronomer Cosmos. Cosmos parses the dbt manifest at DAG-parse time and creates one Airflow task per dbt model — so the Airflow lineage graph shows the dbt model DAG directly, and a failure on a single model surfaces in the Airflow UI as a single red task with a link to the dbt logs. Cleaner observability than wrapping `dbt build` in a single `BashOperator`."
+
+**Carry-forward to Project #3:** Default to per-model task generation (Cosmos or the equivalent for whatever orchestrator Project #3 uses — Dagster's dbt assets, Prefect's `prefect-dbt`, etc.) rather than monolithic shell-out, unless the dbt project is small enough that the manifest-parse overhead at DAG-parse time isn't worth the granularity.
 
 ---
 

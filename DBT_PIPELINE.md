@@ -3,9 +3,10 @@
 > Companion to `EXTRACT_PIPELINE.md`. This doc explains the dbt project that
 > transforms RAW Snowflake data into the analytical layers that power Power BI.
 >
-> Last updated: 2026-05-16 (Phase 4 session 4 — `dim_item`, `dim_store`,
-> first incremental fact `fact_daily_sales`, structural-audit principle
-> applied to the dbt layer).
+> Last updated: 2026-05-17 (Phase 4 session 5 closed — marts layer opened
+> with `mart_executive_overview` under the lean-marts pattern; warehouse
+> star exposed to Power BI directly, marts only for pre-aggregations that
+> earn their keep).
 
 ---
 
@@ -1350,10 +1351,170 @@ first explicit application.
 
 ---
 
-## Sections to add as Phase 4 progresses
+## `mart_executive_overview` walkthrough
 
-- Marts layer — one pre-aggregated mart per Power BI page.
-- `dbt build` orchestration through Airflow (Phase 4 closeout).
+First (and currently only) model in the marts layer. Grain: one row per
+`sale_date`. Source: `WAREHOUSE.fact_daily_sales`. Output: 1,079 rows
+materialised as a table in `RETAIL_DB.MARTS.MART_EXECUTIVE_OVERVIEW`.
+Downstream consumer: the Power BI dashboard's home page.
+
+The mart is the lean-marts pattern's first concrete artefact in this
+project. The original Phase 4 plan was five marts (one per Power BI page);
+the direction changed at session 5 open in favour of exposing the warehouse
+star (`fact_daily_sales` + the three dims) directly to Power BI and using
+marts only for pre-aggregations that earn their keep. Full reasoning lives
+in `LEARNINGS.md` → "2026-05-17 — Lean marts layer + analyst-facing star
+schema". This walkthrough covers the resulting build.
+
+### The lean-marts call in one paragraph
+
+Marts exist when they earn their keep — pre-aggregation for performance,
+or cross-domain joins that don't belong in any single fact. The dashboard
+home page hits a daily summary thousands of times across user sessions;
+pre-aggregating once at dbt build and reading 1,079 rows from Power BI is
+dramatically cheaper than re-aggregating 32.9M rows per query. The other
+Power BI pages (Demand by Hierarchy, Seasonality & Calendar, Promotion &
+Price, Forecast vs Actual) take their data straight from the warehouse
+star — sliced and diced inside Power BI's own VertiPaq engine. Same
+architectural pattern modern analyst-facing teams ship in real shops.
+
+### Shape — two-CTE source → aggregated
+
+```sql
+{{ config(
+    materialized='table'
+) }}
+
+WITH source AS (
+    SELECT *
+    FROM {{ ref('fact_daily_sales') }}
+),
+
+aggregated AS (
+    SELECT
+        sale_date,
+        SUM(units_sold)                                              AS total_units_sold,
+        SUM(revenue_amount_usd)                                      AS total_revenue_usd,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN item_id  END)   AS active_item_count,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN store_id END)   AS active_store_count
+    FROM source
+    GROUP BY sale_date
+)
+
+SELECT * FROM aggregated
+```
+
+Materialised as a table per `dbt_project.yml`'s marts-folder default.
+Power BI reads this repeatedly so the table must be fast; the storage
+cost (1,079 rows × 5 columns) is trivial and well-spent. No `incremental`
+config: at 1,079 rows a full rebuild is single-digit seconds, and a
+daily-summary mart has no clean incremental key (every fact-row change
+for an existing date should update that date's mart row — a full table
+rebuild handles this cleanly; `merge` semantics are overkill).
+
+The `source` CTE pulls the upstream fact unchanged — same naming
+convention as every other model in this project. Makes "swap the source"
+a one-line edit later if the upstream is ever renamed or refactored.
+
+### Two SQL idioms worth a deep look
+
+**`SUM` with NULL-containing measures.** ANSI `SUM()` ignores NULLs by
+default. `revenue_amount_usd` is NULL on ~34.66% of fact rows (M5
+product-lifecycle — items without an active price for that fiscal week),
+so `SUM(revenue_amount_usd)` skips those rows and totals only the priced
+ones. This is the right semantic: a row with unknown revenue contributing
+zero beats a row defaulted to `0` and silently understating the day's
+revenue. Power BI sees daily revenue numbers that represent what was
+actually transacted with a known price; analysts answering "why doesn't
+revenue / units = average price reconcile?" can point at this column's
+NULL rate as the explanation.
+
+**`CASE`-inside-`COUNT(DISTINCT ...)`.** Classic SQL idiom for "count
+distinct things matching a condition." The `CASE` emits the id only when
+`units_sold > 0` (NULL otherwise); `COUNT(DISTINCT ...)` skips NULLs.
+Result: a count of items and stores that actually sold something that
+day, excluding the on-shelf-didn't-sell rows that legitimately exist in
+the fact (preserved as a demand signal but counted as "inactive" for
+executive-dashboard purposes). Cleaner and cheaper than the subquery
+alternative `(SELECT COUNT(DISTINCT item_id) FROM ... WHERE units_sold > 0)`
+because Snowflake can resolve it in a single pass.
+
+### Test design at the mart layer
+
+Ten tests in `_marts__models.yml`:
+
+| Column | Tests |
+|---|---|
+| `sale_date` | `unique` + `not_null` (PK enforcement) |
+| `total_units_sold` | `not_null` + `accepted_range >= 0` |
+| `total_revenue_usd` | `not_null` + `accepted_range >= 0` |
+| `active_item_count` | `not_null` + `accepted_range 0..3049` |
+| `active_store_count` | `not_null` + `accepted_range 0..10` |
+
+Two design calls worth flagging.
+
+**`not_null` on `total_revenue_usd`** — even though the underlying
+`revenue_amount_usd` is nullable at the fact level. The reasoning:
+nullability at the fact is correct (M5 product-lifecycle gaps are real),
+but at the aggregate level a NULL daily total would mean every row in
+that day's fact has NULL price — a catastrophic upstream condition.
+Codifying `not_null` here turns "an entire day's pricing is missing"
+into a test failure rather than a silent blank cell in Power BI.
+
+**`accepted_range` upper bounds tied to dim cardinalities.** `max_value:
+3049` is the total distinct item count in M5; `max_value: 10` is the
+total distinct store count. These caps make a category of grain bug
+(accidental cross-join, key explosion, fan-out from a botched join)
+machine-detectable rather than human-spotted. If either test ever fires,
+something upstream is fanning out the fact's grain — not a downstream
+display bug.
+
+### Build outcome + aggregation compression
+
+Targeted build (`dbt build --select mart_executive_overview`): **PASS=11
+in 7.56 seconds** (1 model + 10 tests). Full-DAG rebuild after shipping
+the mart (`dbt build --no-partial-parse`): **PASS=78 in 17.72 seconds**
+end-to-end (1 incremental + 4 tables + 4 views + 69 tests). The
+incremental fact's `is_incremental()` block evaluates to "no new dates
+beyond 2014-03-21" → MERGE finds zero rows → near-instant; the three
+dims rebuild their ~3k / 10 / 1k rows quickly; the new mart adds 1,079
+rows of work plus its 10 tests.
+
+**Aggregation compression: 32,898,710 → 1,079 rows = ~30,500× reduction.**
+Power BI reads 1,079 rows instead of 33M. A material change to home-page
+refresh time and the storage that lives in Power BI's in-memory model.
+Worth carrying for the interview talk-track: *"I pre-aggregated 32.9M
+fact rows down to a 1,079-row daily summary, a ~30,500× compression that
+makes the dashboard home page instant in Power BI."*
+
+### Verification
+
+`sql/verify/09_phase4_mart_executive_overview_verification.sql` —
+durable verification artefact, 6 numbered sections + single-row PASS/FAIL
+rollup. Follows the same pattern as `05_` through `08_`.
+
+| Section | What it asserts |
+|---|---|
+| 1 | Upstream parity: mart's `SUM(total_units_sold)` and `SUM(total_revenue_usd)` equal the fact's corresponding aggregates; mart's `COUNT(DISTINCT sale_date)` equals the fact's |
+| 2 | PK uniqueness: `COUNT(*)` = `COUNT(DISTINCT sale_date)` (Snowsight-side re-confirmation of the dbt test) |
+| 3 | Active counts reconcile: re-compute the `CASE`-inside-`COUNT(DISTINCT)` values from the fact for one sample date (2013-06-15) and confirm parity |
+| 4 | Headline measure sanity: full-mart totals + date range + row count, verifying $93,559,341.40 total revenue carries through |
+| 5 | Five-row eyeball: five evenly-spaced dates with all measures, see-it-yourself check |
+| 6 | Single-row PASS/FAIL rollup: 4-column health check across `units_parity` / `revenue_parity` / `pk_unique` / `active_store_max` |
+
+First-run results (session 5): §1 → 3 rows of mart = fact parity (units
+34,437,817; revenue $93,559,341.40; date_count 1,079); §2 → 1,079 = 1,079
+with 0 duplicates; §3 → mart 2,205/10 = fact 2,205/10 on 2013-06-15; §4 →
+$93,559,341.40 confirmed; §5 → five rows all positive, `active_store_count`
+= 10 on every sampled date; **§6 → 4× PASS**.
+
+---
+
+## Sections to add (Phase 4 closeout)
+
+- `dbt build` orchestration through Airflow — the Phase 4 → Phase 5
+  bridge: an Airflow task that runs `dbt build` after each daily extract
+  lands, so the warehouse + mart stay fresh without manual intervention.
 
 ---
 

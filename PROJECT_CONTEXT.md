@@ -2,13 +2,53 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-16 (Phase 4 session 4 closed — warehouse layer complete: dim_item + dim_store + first incremental fact `fact_daily_sales` (32.9M rows, $93.5M total revenue), 24 new tests, full DAG green in 15.26s. CODE_QUALITY.md gained a new "Phase-boundary structural audit" section — applied immediately and caught two real findings (`04_` filename collision + stale `.gitkeep` placeholders), both fixed in-session before commit. 12 new LEARNINGS entries; 4 new DBT_PIPELINE walkthrough sections).
+> Last updated: 2026-05-17 (Phase 4 session 5 closed — marts layer opened with `mart_executive_overview` under the **lean-marts pattern** (direction change locked at session 5 open: dropped 5-marts-one-per-page in favour of exposing the warehouse star directly to Power BI, marts only where they earn their keep). 1 mart, 10 tests, 1,079 rows, **~30,500× aggregation compression** of the 32.9M-row fact. Full DAG: PASS=78 in 17.72s. Phase-boundary structural audit caught one historical accounting finding (corrected). New architectural decision locked mid-session: Phase 4 session 6 extends the `m5_daily_extract` DAG with dbt orchestration via **Astronomer Cosmos** — per-model Airflow tasks with full lineage in the UI. Power BI moves one session out to Phase 5).
 
 ---
 
 ## Where we are right now
 
-**Current phase:** **Phase 4 session 4 ✅ DONE** — warehouse layer complete. `dim_item` (3,049 rows, 6 tests) and `dim_store` (10 rows, 5 tests) shipped using the two-CTE source-side pattern (no string parsing — M5 ships `dept_id`/`cat_id`/`state_id` as their own columns in staging, so chose direct passthrough over `SPLIT_PART` regex). `fact_daily_sales` shipped as the project's first **incremental** model and first model with Snowflake clustering — 32,898,710 rows materialised in 21.97s with 13 tests (including 3 FK `relationships`, 1 compound-key uniqueness, 1 `dbt_utils.accepted_range` for `units_sold >= 0`); subsequent full-DAG `dbt build --no-partial-parse` rebuilt the whole project in **15.26 seconds** (incremental's `is_incremental()` block evaluated to "no new dates beyond 2014-03-21" → MERGE found zero rows → near-instant). Four surrogate keys (`sale_key`, `item_key`, `store_key`, `date_key`) all via `dbt_utils.generate_surrogate_key`; compute-same-way matching to the three dims (same MD5 input → same hash → FK-PK matching by construction, no JOIN-to-dim needed). `relationships` tests on the 32.9M-row fact each completed in **<0.5s** — counter to the row-store intuition that relationships tests scale poorly. **`MissingArgumentsPropertyInGenericTestDeprecation` re-encountered** (3 occurrences on the new `relationships` tests) — same dbt 1.10+ lesson from session 3, fixed by wrapping arguments in `arguments:` block; discipline rule now reinforced after the second hit. **New framework principle captured: Phase-boundary structural audit** added to `CODE_QUALITY.md` between "Three additional failsafes" and "Why this checklist exists" — a structural pass over file inventory at every phase boundary, before docs closeout and before the bundled commit. First explicit application caught two real findings: `04_` filename collision in `sql/verify/` (renamed `04_phase4_int_sales_with_prices_verification.sql` → `04a_` to preserve monotonic ordering without renumbering downstream `05_`-`08_` files) and three stale `.gitkeep` placeholders in `staging/`/`intermediate/`/`warehouse/` model folders (deleted; only `marts/.gitkeep` remains pending session 5). Both 30-second fixes in-session; both would have been frozen into the session commit otherwise. **Portfolio scale captured for interview talk-track**: 32.9M fact rows, $93,559,341.40 total revenue, 3,049 items × 10 stores × ~1,148 days, 0 orphan FKs across three relationships tests, 58 dbt tests across the project, 15.26s full DAG re-validation. 12 new LEARNINGS entries appended to the dbt section (phase-boundary audit headline, incremental materialization, Snowflake clustering vs BigQuery partitioning, compute-same-way keys vs JOIN-to-dims, relationships at scale, `accepted_range`, deprecation re-encounter, `dim_item` design call, two-CTE pattern, MD5 surrogate consistency across the star, first full-DAG rebuild timing, headline numbers). DBT_PIPELINE.md +4 walkthrough sections (`dim_item`, `dim_store`, `fact_daily_sales` deep-dive, structural audit applied to dbt). The dbt project now spans `RAW → STAGING → INTERMEDIATE → WAREHOUSE` end-to-end with full test coverage; only MARTS remains. Next session opens **Phase 4 session 5** — the marts layer (one mart per Power BI page).
+**Current phase:** **Phase 4 session 5 ✅ DONE** — marts layer opened with `mart_executive_overview` under the **lean-marts pattern**. Direction change locked at session 5 open: dropped the original 5-marts-one-per-page plan in favour of exposing the warehouse star (fact + dims) directly to Power BI, with marts only for pre-aggregations that earn their keep. `mart_executive_overview` (1,079 rows, 10 tests, 7.56s targeted build) pre-aggregates `fact_daily_sales` (32.9M rows) to a daily summary for the Power BI home page — **~30,500× compression**. Full-DAG `dbt build --no-partial-parse`: **PASS=78 in 17.72s** (1 incremental + 4 tables + 4 views + 69 tests). Snowsight verify §6 → 4× PASS. **Phase-boundary structural audit** caught one historical accounting finding: PROJECT_CONTEXT session-4 record undercounted `fact_daily_sales` tests by 1 (eyeballed 13, actual 14; project total 58 → corrected to 59 at session-4 close). Discipline rule: count tests by running targeted `dbt build` output, not by eyeballing the YAML. **New architectural decision locked mid-session**: Phase 4 session 6 (next) extends `m5_daily_extract.py` from 2 tasks to 4 — `extract_one_day → verify_one_day → <Cosmos task group for dbt> → verify_dbt_one_day` — via **Astronomer Cosmos** so each dbt model becomes its own Airflow task with full lineage in the UI. Most-professional pattern for the BI-Analyst / DE-adjacent role-shape Phil is targeting; real-shop integration. Power BI moves one session out to Phase 5. Full reasoning in `LEARNINGS.md` → "2026-05-17 — Extend Airflow DAG with dbt orchestration via Astronomer Cosmos". The dbt project now spans `RAW → STAGING → INTERMEDIATE → WAREHOUSE → MARTS` end-to-end with full test coverage; only orchestration glue remains.
+
+**Last action (2026-05-17 — Phase 4 session 5):** Marts layer opened end-to-end under the lean-marts pattern. Direction-change decision logged in `LEARNINGS.md` → "2026-05-17 — Lean marts layer + analyst-facing star schema". `mart_executive_overview.sql` shipped — two-CTE shape (source → aggregated), `SUM(units_sold)` + `SUM(revenue_amount_usd)` + `CASE`-inside-`COUNT(DISTINCT)` for active item/store counts. 10 tests in `_marts__models.yml`: `unique`/`not_null` on `sale_date` PK, `not_null` + `accepted_range` on the four measures (`accepted_range` upper bounds 3,049 and 10 tied to M5 dim cardinalities — grain-safety nets). All tests use modern dbt 1.10+ `arguments:` syntax from the start — discipline rule from sessions 3+4 applied without re-encountering the deprecation. Targeted build `dbt build --select mart_executive_overview` → **PASS=11 in 7.56s**; subsequent full-DAG `dbt build --no-partial-parse` → **PASS=78 in 17.72s** end-to-end. Verify SQL `09_phase4_mart_executive_overview_verification.sql` — 6 sections + single-row PASS/FAIL rollup; ran section-by-section in Snowsight, **§6 → 4× PASS**. Aggregation parity verified at the SUM level (units 34,437,817 and revenue $93,559,341.40 both reconcile mart vs fact); active counts reconciled via re-computation from the fact for 2013-06-15 (mart 2,205 items / 10 stores = fact 2,205 / 10). **10-point code-quality audit**: 10 ✅ across all three new files. **Phase-boundary structural audit** (second explicit application): caught one real historical finding — PROJECT_CONTEXT session-4 record undercounted `fact_daily_sales` tests by 1 (model-level `unique_combination_of_columns` test was missed in the column-level tally). Corrected in this block; discipline rule going forward: count tests by reading the targeted `dbt build` output line, not by scanning the YAML. **`marts/.gitkeep` deleted** — stale scaffolding from session 1; folder now contains real model files. All four dbt model folders now scaffolding-free. **At session 5 open**: revised `PROJECT_PLAN.md` locking the lean-marts pattern (Architecture row in locked decisions, Phase 4 timeline row, "Power BI choking on raw fact" risk-register entry marked Superseded 2026-05-17). **At session 5 close**: locked Phase 4 session 6 (Airflow ↔ dbt wiring via Astronomer Cosmos) — Cosmos chosen over `BashOperator`/hybrid because each dbt model becomes its own Airflow task with full lineage in the UI; real-shop integration pattern; most professional for the targeted role-shape.
+
+**Files added this session (Phase 4 session 5):**
+
+- `dbt/models/marts/mart_executive_overview.sql` — first mart in the project. Two-CTE shape (source → aggregated). 28 lines, `materialized='table'`. 1,079 rows materialised in `RETAIL_DB.MARTS.MART_EXECUTIVE_OVERVIEW`.
+- `dbt/models/marts/_marts__models.yml` — schema YAML for the mart. 10 tests across 5 columns. Modern dbt 1.10+ `arguments:` syntax on every namespaced test. Rich column descriptions explain the `not_null` reasoning on `total_revenue_usd` (aggregate of nullable fact column) and the `accepted_range` upper bounds tied to dim cardinalities.
+- `sql/verify/09_phase4_mart_executive_overview_verification.sql` — durable verification artefact. 6 numbered sections + single-row PASS/FAIL rollup. Same pattern as `05_` through `08_`. Re-runnable from Snowsight any time.
+
+**Files updated this session (Phase 4 session 5):**
+
+- `LEARNINGS.md` — 4 new entries: Design Decision "2026-05-17 — Lean marts layer + analyst-facing star schema" (locked the architectural direction early in the session); Technical Learning "2026-05-17 — Mart-layer aggregation patterns" (SUM-NULL, CASE-inside-COUNT-DISTINCT, cardinality-tied `accepted_range`, `not_null`-on-aggregate-of-nullable); Mistakes & diagnoses entry "2026-05-17 — Test-count drift in PROJECT_CONTEXT records" (the +1 historical accounting finding from the structural audit); Design Decision "2026-05-17 — Extend Airflow DAG with dbt orchestration via Astronomer Cosmos" (locked Phase 4 session 6 plan).
+- `DBT_PIPELINE.md` — added `mart_executive_overview` walkthrough section (~130 lines) matching the depth of `fact_daily_sales`. Six sub-sections (lean-marts call in one paragraph, shape with CTE structure, two SQL idioms, test design with cardinality-tied bounds, build outcome + ~30,500× compression headline, verification table). Header date bumped to 2026-05-17. "Sections to add as Phase 4 progresses" placeholder trimmed and renamed to "Sections to add (Phase 4 closeout)" — Marts bullet removed (covered); only the Airflow-orchestrating-dbt bullet remains, now pointing at session 6.
+- `PROJECT_PLAN.md` — Architecture row in locked decisions updated to reference lean marts. Phase 4 timeline row description rewritten ("Marts layer (lean): `mart_executive_overview` only..."); Phase title renamed to "dbt transformations + orchestration"; session count bumped 3-4 → 5-6 (5 done, session 6 for Cosmos); deliverable row updated to "+ Airflow-orchestrated dbt build". Risk-register "Power BI choking on raw fact" entry marked **Superseded 2026-05-17**. Status block at bottom updated to Phase 4 session 5 closed / session 6 next.
+- `PROJECT_CONTEXT.md` — this file. Header date + "Current phase" paragraph rewritten. New session-5 closeout block inserted above the session-4 block. Session-4 block left intact as historical record (its "Next session" plan for session 5 reads as the planning record of what we then executed).
+
+**Files deleted this session (Phase 4 session 5):**
+
+- `dbt/models/marts/.gitkeep` — stale scaffolding from Phase 4 session 1; folder now contains real model files (`mart_executive_overview.sql`, `_marts__models.yml`). All four dbt model folders are now scaffolding-free. Only `airflow/plugins/.gitkeep` remains in the repo, and that's a legitimate placeholder (folder genuinely empty pending plugin work).
+
+**Headline outcomes from this session (Phase 4 session 5):**
+
+- **Lean-marts architectural pattern locked.** Dropped from 5 marts to 1 (with `mart_forecast_vs_actual` deferred to Phase 5 if needed). The warehouse star (fact + dims) is now the primary analyst-facing surface; marts hold pre-aggregations only where they earn their keep. Most-professional default for the BI-Analyst / DE-adjacent role-shape Phil is targeting; gives Power BI real modelling work to demonstrate. Interview talk-track: *"I exposed the warehouse star directly to Power BI for analyst flexibility. The marts layer holds pre-aggregations only where they genuinely earn their keep."*
+- **Marts layer live end-to-end.** `mart_executive_overview` shipped, tested (10 dbt tests + 6-section Snowsight verify, all PASS), and end-to-end-rebuilt in 17.72s. The dbt project now spans `RAW → STAGING → INTERMEDIATE → WAREHOUSE → MARTS` with full test coverage at every layer.
+- **Aggregation compression — interview talk-track number.** 32,898,710 fact rows → 1,079 mart rows = **~30,500× compression**. Power BI home page reads 1,079 rows instead of 33M. *"I pre-aggregated 32.9M fact rows down to a 1,079-row daily summary, a ~30,500× compression that makes the dashboard home page instant in Power BI."*
+- **Phase 4 session 6 (Airflow ↔ dbt wiring via Cosmos) locked.** Direction change captured mid-session: extending the existing DAG with `<Cosmos task group> → verify_dbt_one_day` tasks. Closes Phase 4 with the headline portfolio narrative — *the pipeline runs end-to-end on a schedule, with proper failure handling, tests, and per-model lineage visibility*.
+- **Structural audit earned its keep again** on its second explicit application — caught the +1 test-count drift in PROJECT_CONTEXT records that would otherwise have propagated forward as a stale number.
+
+**Next session (Phase 4 session 6) — Airflow ↔ dbt wiring via Astronomer Cosmos:**
+
+1. **Pre-flight research** — read Cosmos docs to confirm installation steps in our existing Airflow stack (Docker image extension, `astronomer-cosmos` pip pin, profile/project mounting into the worker container).
+2. **Install Cosmos** — add `astronomer-cosmos` to `airflow/requirements-airflow.txt` (or equivalent), rebuild the Airflow image, restart the stack. Verify with a one-line import test.
+3. **Extend `m5_daily_extract.py`** — add a `DbtTaskGroup` (or equivalent Cosmos construct) downstream of `verify_one_day`. Each dbt model becomes its own Airflow task; the existing `dbt_project.yml` + `profiles.yml` get mounted into the worker. Confirm per-model task visibility in the Airflow UI's graph view.
+4. **Add `verify_dbt_one_day` task** downstream of the Cosmos task group. Runs the §6 PASS/FAIL queries from `04_` / `04a_` / `05_` / `06_` / `07_` / `08_` / `09_*.sql` against Snowflake. Single Airflow task, multi-section query, RuntimeError on any FAIL — same pattern as the existing `verify_one_day`.
+5. **End-to-end trigger** — manual UI-form trigger for one date. Observe all four stages fire green: extract → verify_extract → Cosmos-managed dbt models → verify_dbt. Confirm per-model dbt-task visibility in the Cosmos UI.
+6. **Failure injection test** — deliberately break one dbt test (e.g., flip an `accepted_range` lower bound) and trigger; confirm `verify_dbt_one_day` does not fire (chain halts cleanly at the dbt-test failure).
+7. **Doc updates** — DBT_PIPELINE.md gains a substantial "Airflow orchestration" section; PROJECT_PLAN / PROJECT_CONTEXT / LEARNINGS get session-6 closeout blocks. Per-script 10-point + phase-boundary structural audits applied.
+8. **Bundled commit + push** — closes Phase 4 properly. Power BI opens next as Phase 5 session 1.
+
+---
 
 **Last action (2026-05-16 — Phase 4 session 4):** Closed the warehouse layer end-to-end. Three new models shipped: `dim_item` (3,049 rows, 6 tests, two-CTE source-side pattern), `dim_store` (10 rows, 5 tests, identical shape), `fact_daily_sales` (32,898,710 rows as the project's first **incremental** model with `unique_key='sale_key'`, `cluster_by=['sale_date']`, `on_schema_change='fail'`, 13 tests including three FK `relationships`, compound-key uniqueness, and `accepted_range` on `units_sold`). First targeted build of the fact: 21.97s for 32.9M rows + 12 tests. Subsequent full-DAG `dbt build --no-partial-parse`: **15.26s** end-to-end (PASS=66 / WARN=0 / ERROR=0). The incremental's `is_incremental()` block evaluated to "no new dates beyond 2014-03-21" → MERGE found zero new rows → near-instant rebuild. Three `relationships` tests on the 32.9M-row fact each completed in <0.5s — Snowflake's optimiser resolves them as hash joins with the small dims in memory. The compute-same-way FK-key pattern (re-hash `item_id`/`store_id`/`sale_date` on the fact side via `dbt_utils.generate_surrogate_key`, same inputs as the dims' PKs → matching hashes by construction) avoided the cost of three JOINs against the 32.9M-row fact at build time, with `relationships` tests catching any drift. **`MissingArgumentsPropertyInGenericTestDeprecation` re-encountered** — 3 occurrences on the new `relationships` tests in `_warehouse__models.yml`. Same dbt 1.10+ lesson from session 3 on the compound-key test; fix is identical (wrap args in `arguments:` block). Second hit reinforces the discipline rule: every new generic test gets modern `arguments:` syntax from the start. **Polish-add caught in the 10-point audit**: empirical `MIN(units_sold) = 0` confirmed in verify Section 4, but no codified test — added `dbt_utils.accepted_range` with `min_value: 0, inclusive: true` so the constraint is machine-enforced not just human-spotted. **`dim_item` design call worth remembering**: `PROJECT_CONTEXT` had originally flagged "derive department/category from item_id structure" — when it came time to build, staging already had `dept_id`/`cat_id` as separate columns shipped from M5's CSV. Chose `SELECT DISTINCT item_id, dept_id, cat_id` over `SPLIT_PART` regex. Discipline rule: prefer source-truth over derivation when the data already has the columns; "derive from structure" is the fallback, not the default. **New framework principle: phase-boundary structural audit** added to `CODE_QUALITY.md` between "Three additional failsafes" and "Why this checklist exists". Distinct from the per-script 10-point audit — verifies the project as a *collection* is consistent (no naming collisions, no stale scaffolding, no missing pairings, no test-count drift). First explicit application caught two real findings: (a) `04_phase4_int_sales_with_prices_verification.sql` (session 3) shared a numeric prefix with `04_phase4_staging_layer_verification.sql` (session 2) — renamed the intermediate one to `04a_` to preserve monotonic ordering without renumbering downstream `05_`/`06_`/`07_`/`08_` files; (b) three stale `.gitkeep` placeholders in `staging/`/`intermediate/`/`warehouse/` model folders despite those folders now containing real models — deleted; only `marts/.gitkeep` remains pending session 5. Both 30-second fixes in-session; both would have been frozen into the session commit otherwise. The audit paid for itself on its first run.
 
@@ -40,18 +80,29 @@
 - **Deprecation re-encountered, lesson reinforced.** `MissingArgumentsPropertyInGenericTestDeprecation` fired three times on the new `relationships` tests. Same lesson from session 3 — second hit. The deprecation is now baked in as a discipline rule: every new generic test (any test name with a `.` or the built-in `relationships`) gets modern `arguments:` wrapping from the start, not after the deprecation warning surfaces.
 - **Portfolio scale captured.** 32,898,710 fact rows, $93,559,341.40 total revenue, 3,049 items × 10 stores × ~1,148 days of coverage, 0 orphan FKs, 58 dbt tests, 15.26s full-DAG re-validation. Real numbers from a real pipeline — kind of scale-of-data signal that elevates a portfolio repo from "I followed a tutorial" to "I built and validated a production-shaped pipeline."
 
-**Next session (Phase 4 session 5):**
+**Next session (Phase 4 session 5) — lean marts layer:**
 
-1. Marts layer — one pre-aggregated mart per Power BI page (5 marts total): Executive Overview, Demand by Hierarchy, Promotion & Price, Seasonality & Calendar, Forecast vs Actual. Pre-aggregated for fast dashboard refresh and explicit lineage between BI and warehouse.
-2. `mart_*` materialisation defaults to `table` per `dbt_project.yml`. Consider `incremental` on any mart whose aggregation logic is amenable (probably only Forecast vs Actual will need it; the others should fit comfortably in single-digit-second full rebuilds).
-3. Schema YAML + tests on each mart — `unique` + `not_null` on PK at minimum; `accepted_range` on key measures where business rules exist.
-4. Per-model verify SQL files (`09_` / `10_` / `11_` / `12_` / `13_phase4_*_verification.sql`).
-5. Delete `dbt/models/marts/.gitkeep` once the first mart lands.
-6. End-of-phase structural audit + 10-point code-quality audit + doc updates + bundled commit. Closes Phase 4.
+Direction change locked at session 5 open: dropped the original 5-marts-one-per-page plan in favour of a **lean / analyst-facing star** pattern. Power BI consumes `WAREHOUSE.fact_*` + `dim_*` directly for slice/dice work; marts hold pre-aggregations only where they earn their keep. Full reasoning in `LEARNINGS.md` "2026-05-17 — Lean marts layer + analyst-facing star schema". Plan for this session:
+
+1. **One mart only: `mart_executive_overview`.** Grain: one row per `sale_date`. Columns: `sale_date` (PK), `total_units_sold`, `total_revenue_usd`, `active_item_count`, `active_store_count`, `rows_in_grain` (diagnostic). NO denormalised date attributes — Power BI joins `dim_calendar` for those. Pre-aggregates 32.9M fact rows → ~1,148 daily rows for fast home-page refresh.
+2. Materialised as `table` per `dbt_project.yml` marts default. No incremental needed at this volume.
+3. Schema YAML — `unique` + `not_null` on `sale_date`; `accepted_range` on `total_units_sold` and `total_revenue_usd` (both `>= 0`).
+4. Per-model verify SQL file `09_phase4_mart_executive_overview_verification.sql` — sections for upstream parity vs `fact_daily_sales`, PK uniqueness, measure-sanity (totals reconcile), 5-row eyeball, PASS/FAIL rollup.
+5. Delete `dbt/models/marts/.gitkeep` once the mart lands.
+6. `mart_forecast_vs_actual` deferred to Phase 5 (only built once forecasts exist; legitimate cross-domain mart).
+7. End-of-phase structural audit + 10-point code-quality audit + doc updates (DBT_PIPELINE marts walkthrough section) + bundled commit. Closes Phase 4.
 
 ---
 
-**Last action (2026-05-16 — Phase 4 session 3):** Opened the intermediate and warehouse layers in one session. `dbt_utils 1.3.3` installed via `packages.yml` + `dbt deps`; `package-lock.yml` auto-generated and committed; `dbt_packages/` already gitignored on line 78. Compound-key uniqueness test added to `stg_m5_sell_prices` for `(store_id, item_id, wm_yr_wk)` — first use of `dbt_utils.unique_combination_of_columns`. Caught dbt 1.10+ deprecation mid-session — `MissingArgumentsPropertyInGenericTestDeprecation` on the new test — fixed by wrapping macro args in `arguments:` (modern syntax); re-ran with `--no-partial-parse` to flush the deprecation cache. Built `int_sales_with_prices` (intermediate, view) using `source → enriched → final` CTE pattern: LEFT JOIN to `stg_m5_calendar` to attach `wm_yr_wk`, LEFT JOIN to `stg_m5_sell_prices` for `sell_price`, computed `revenue_amount_usd = units_sold * sell_price`. Live-verified in Snowsight via three checks (row-count parity 32.9M = 32.9M, 10-row sample with row-level revenue math all spot-on, NULL-price rate 34.66% — explained by M5 product lifecycle). 8 tests pass on the model. Built `dim_calendar` (warehouse, **table**) using the same CTE pattern with `{{ dbt_utils.generate_surrogate_key(['calendar_date']) }}` for `date_key` (32-char MD5 hex). All date attributes derived fresh from `calendar_date` via Snowflake ISO date variants (`DAYOFWEEKISO`, `WEEKISO`) for session-parameter independence; `is_weekend` via `DAYNAME(...) IN ('Sat', 'Sun')` for convention-independence; `is_holiday` Boolean rolls up `event_name_1 IS NOT NULL OR event_name_2 IS NOT NULL`. 1,079 rows, 11 tests pass. Verified live in Snowsight via two checks (key uniqueness + row count + date range, 5-row attribute eyeball on three known holidays + one weekend + one ordinary weekday); third "distribution sanity" check added to the verify file confirmed weekend rate 28.64% (vs theoretical 28.57%), holiday rate 8.16%, 30 distinct event names (broader than first guess of ~14). NULL-vs-empty-string trap caught implicitly — `is_holiday = FALSE` on event-less rows proves event columns are genuine NULLs not empty strings (an empty string would have flipped the flag TRUE — classic SQL gotcha). 10-point code-quality audit: 8 ✅ initially, 2 ⚠️ resolved in-session (anomaly check + verify SQL files); final state 10 ✅, 0 ⚠️, sqlfluff still deferred to Phase 6 per plan. Anomaly check (`units_sold > 0 AND sell_price IS NULL`) returned 0 rows — proves the LEFT JOIN didn't silently drop real sales; every priceless row is a zero-units row, validating LEFT JOIN as a semantic design choice (preserves "product on shelf, didn't sell" demand signal that INNER would have lost). Two per-model verification SQL files created — `04_phase4_int_sales_with_prices_verification.sql` (5 sections + Section 5 rollup), `05_phase4_dim_calendar_verification.sql` (4 sections + Section 4 rollup). Spun up a parallel sub-agent partway through the dbt work to build `GLOSSARY.md` — ~155 terms across 16 sections (~880 lines, `[Project 2]` tags on project-specific entries so general terms lift cleanly into Project 3). Strong portfolio polish move at low marginal cost. Mid-session refinement to `TEACHING_PREFERENCES.md`: Snowsight diagnostic queries follow the same one-query-per-code-block rule as PowerShell (Phil's preference, captured for carry-forward).
+**Last action (2026-05-16 — Phase 4 session 3):** Opened intermediate + warehouse layers in one session.
+
+- `dbt_utils 1.3.3` installed via `packages.yml` + `dbt deps`; `package-lock.yml` committed.
+- First compound-key uniqueness test on `stg_m5_sell_prices` `(store_id, item_id, wm_yr_wk)`; caught dbt 1.10+ `MissingArgumentsPropertyInGenericTestDeprecation` mid-session — fixed via `arguments:` wrapping, flushed cache with `--no-partial-parse`.
+- Built `int_sales_with_prices` (view) using `source → enriched → final` CTE pattern; LEFT JOIN to calendar + prices, computed `revenue_amount_usd`. 8 tests pass. Live-verified in Snowsight — 32.9M row parity, NULL-price rate 34.66% (M5 product lifecycle).
+- Built `dim_calendar` (warehouse, **table**) — `dbt_utils.generate_surrogate_key(['calendar_date'])` for `date_key`. ISO date variants (`DAYOFWEEKISO`, `WEEKISO`) + `DAYNAME(...) IN ('Sat','Sun')` for session-parameter/convention independence. 1,079 rows, 11 tests. Distribution sanity confirmed weekend rate 28.64%, holiday rate 8.16%, 30 distinct event names. NULL-vs-empty-string trap caught implicitly via `is_holiday = FALSE` on event-less rows.
+- 10-point audit: final 10 ✅ (sqlfluff still deferred to Phase 6). Anomaly check `units_sold > 0 AND sell_price IS NULL` returned 0 rows — validates LEFT JOIN as semantic design choice (preserves "on shelf, didn't sell" signal).
+- Two per-model verify files added (`04_phase4_int_sales_with_prices_verification.sql`, `05_phase4_dim_calendar_verification.sql`).
+- Parallel sub-agent built `GLOSSARY.md` — ~155 terms across 16 sections (~880 lines, `[Project 2]` tags for carry-forward). `TEACHING_PREFERENCES.md` gained one bullet: Snowsight diagnostics follow the one-query-per-code-block rule.
 
 **Files added this session (Phase 4 session 3):**
 
@@ -81,18 +132,15 @@
 - **NULL-vs-empty-string trap caught implicitly.** Strong real example for interview talk track — `is_holiday = FALSE` on event-less rows proved the underlying values were genuine NULLs (an empty string would have flipped the flag TRUE; `'' IS NOT NULL` evaluates to TRUE in every major SQL dialect).
 - **Documentation step-changed.** `GLOSSARY.md` is the standout bonus — uncommon for portfolio repos, clean signal to recruiters that vocabulary is being built deliberately. `LEARNINGS.md` and `DBT_PIPELINE.md` got 12 + 7 substantive new entries respectively, both close to doubling in size. Both will support job-interview deep-dives.
 
-**Next session (Phase 4 session 4):**
-
-1. `dim_item` — second dimension table. `item_key` surrogate via `dbt_utils.generate_surrogate_key(['item_id'])`. Adds `department` / `category` derived from item_id structure (M5 item_ids are `<DEPT>_<CAT>_<NNN>`). ~3,049 rows.
-2. `dim_store` — third dimension. Smallest of the three (~10 rows). `store_key` surrogate. Derived `state` from store_id structure (M5 store_ids are `<STATE>_<NN>`).
-3. `fact_daily_sales` — the centrepiece. Materialised as `incremental` table partitioned on `sale_date`. Sources from `int_sales_with_prices`; layers on dim foreign keys (`item_key`, `store_key`, `date_key`). The first model where incremental semantics matter and the first model where partitioning is real.
-4. Run `dbt build` end-to-end across the whole DAG; capture timings as a benchmark.
-5. Per-model verify SQL files for the three new models (`06_`, `07_`, `08_phase4_*_verification.sql`).
-6. 10-point code-quality audit + doc updates + bundled commit.
-
 ---
 
-**Last action (2026-05-15 afternoon — Phase 4 session 2):** Built the staging layer end-to-end. Per-layer schema separation wired up (custom `generate_schema_name` macro + `+schema:` per folder in `dbt_project.yml`) — clean schema names (STAGING, INTERMEDIATE, WAREHOUSE, MARTS) instead of dbt's default concatenation gotcha. `sources.yml` shipped with column docs + 36h/72h freshness thresholds (all three sources PASS on `dbt source freshness`); fixed a dbt 1.11 `PropertyMovedToConfigDeprecation` warning by nesting `loaded_at_field` + `freshness` under `config:`. Three staging models written: `stg_m5_calendar` (flat SELECT — cast date to DATE, snake-case SNAP columns), `stg_m5_sell_prices` (9-line passthrough), `stg_m5_sales_train` (CTE pattern with LEFT JOIN to `stg_m5_calendar` for `d_NNNN` → real DATE translation). 14 data tests in `_staging__models.yml` including the `sale_date NOT NULL` join sentinel. **Real bug caught mid-session:** first `dbt build --select staging` failed with Snowflake `Insufficient privileges to operate on database 'RETAIL_DB'` — the role didn't have `CREATE SCHEMA` on `RETAIL_DB`. Diagnosed with `SHOW GRANTS`, fixed with new `sql/snowflake/03_grant_dbt_privileges.sql` (single GRANT), re-ran successfully. 10-point audit applied at close: 8 ✅, 1 ⚠️ flagged for Phase 6 (sqlfluff), 1 ⚠️ closed in-session (eyeball SELECTs in Snowsight). Final state: `dbt build --select staging` → PASS=17 (3 views + 14 tests) in 4.5 seconds.
+**Last action (2026-05-15 afternoon — Phase 4 session 2):** Built the staging layer end-to-end.
+
+- Per-layer schema separation wired (custom `generate_schema_name` macro + `+schema:` per folder) — clean STAGING/INTERMEDIATE/WAREHOUSE/MARTS schemas instead of dbt's default concatenation.
+- `sources.yml` with column docs + 36h/72h freshness thresholds; fixed dbt 1.11 `PropertyMovedToConfigDeprecation` by nesting under `config:`. All three sources PASS on `dbt source freshness`.
+- Three staging models: `stg_m5_calendar` (flat — date cast, SNAP snake-case), `stg_m5_sell_prices` (9-line passthrough), `stg_m5_sales_train` (CTE pattern with LEFT JOIN to calendar for `d_NNNN` → real DATE). 14 tests including the `sale_date NOT NULL` join sentinel.
+- **Real bug caught mid-session:** first `dbt build --select staging` failed with `Insufficient privileges to operate on database 'RETAIL_DB'` — role lacked `CREATE SCHEMA`. Diagnosed via `SHOW GRANTS`, fixed with new `sql/snowflake/03_grant_dbt_privileges.sql` (single GRANT), re-ran clean.
+- 10-point audit: 8 ✅, 1 ⚠️ flagged for Phase 6 (sqlfluff), 1 ⚠️ closed in-session. Final state: `dbt build --select staging` → PASS=17 (3 views + 14 tests) in 4.5s.
 
 **Files added this session (Phase 4 session 2):**
 
@@ -120,17 +168,14 @@
 - **The LEFT-JOIN-as-sentinel pattern goes mainstream.** First explicit use in `stg_m5_sales_train` — defensive practice that surfaces data drift (calendar mismatches) as test failures instead of silent row drops. Will reuse on every staging/intermediate join going forward.
 - **10-point audit applied honestly.** 8 ✅, 1 ⚠️ (sqlfluff, deferred to Phase 6 by plan), 1 ⚠️ closed in-session (Snowsight eyeball SELECTs confirmed the date cast, SNAP rename, join translation, units_sold rename all worked at the row level).
 
-**Next session (Phase 4 session 3):**
-
-1. Install the `dbt_utils` package via `packages.yml` + `dbt deps` — opens up `generate_surrogate_key`, `unique_combination_of_columns`, and many other helpers.
-2. Add a compound-key uniqueness test on `stg_m5_sell_prices` `(store_id, item_id, wm_yr_wk)` now that `dbt_utils.unique_combination_of_columns` is available.
-3. First intermediate model — `int_sales_with_prices`. Joins `stg_m5_sales_train` to `stg_m5_sell_prices` via `wm_yr_wk` to attach a price to every sale row. Adds the revenue calculation (`units_sold * sell_price` AS `revenue_amount_usd`).
-4. Open the warehouse layer with `dim_calendar` — first dimension table, surrogate key via `dbt_utils.generate_surrogate_key`. Easy first dim because the source is already mostly a star-friendly shape.
-5. 10-point audit + doc updates + commit.
-
 ---
 
-**Last action (2026-05-15 — Phase 4 session 1):** Scaffolded the dbt project from scratch using hand-scaffold (not `dbt init`) — every file authored deliberately. `dbt-snowflake 1.11.5` installed into existing `.venv` alongside the Phase 3 Airflow stub; pip surfaced the expected "multiple tools in one venv" warnings — all harmless, no dbt-side impact (see LEARNINGS). Wrote `dbt/dbt_project.yml` and `dbt/profiles.yml` (clean professional versions, walkthrough lives in new `DBT_PIPELINE.md`). `.gitignore` line 14 had a blanket `profiles.yml` ignore — added a `!dbt/profiles.yml` exception because our profile uses `env_var()` and is safe to commit. `dbt debug` passes end-to-end. **Mid-session pacing & teaching-format refinements** captured in `TEACHING_PREFERENCES.md`: (a) comments-above-the-line for inline code explanations (never end-of-line — horizontal scroll breaks reading flow); (b) three-layer pattern for every code-shaped file going forward — verbose-version-in-chat, clean-version-on-disk, walkthrough-doc-alongside.
+**Last action (2026-05-15 — Phase 4 session 1):** Hand-scaffolded the dbt project (not `dbt init`) — every file deliberate.
+
+- `dbt-snowflake 1.11.5` installed into existing `.venv` alongside Phase 3's Airflow stub; expected "multiple tools in one venv" pip warnings, all harmless (see LEARNINGS).
+- Wrote `dbt/dbt_project.yml` and `dbt/profiles.yml` (clean professional versions; walkthrough in new `DBT_PIPELINE.md`).
+- `.gitignore` got `!dbt/profiles.yml` exception (profile uses `env_var()`, safe to commit). `dbt debug` passes end-to-end.
+- Mid-session `TEACHING_PREFERENCES.md` refinements: (a) comments-above-the-line never end-of-line (horizontal scroll breaks reading flow); (b) three-layer pattern for every code-shaped file — verbose-in-chat / clean-on-disk / walkthrough-md-alongside.
 
 **Files added this session (Phase 4 session 1):**
 
@@ -155,17 +200,13 @@
 - **TEACHING_PREFERENCES.md evolved twice mid-session.** Phil pushed back on (a) heavily-commented YAML being unsuitable for a portfolio and (b) end-of-line comments forcing horizontal scroll in chat. Both refinements captured as durable rules — applies across all future code-shaped work in Project 2 and any Project 3.
 - **Schema-separation TODO open.** `profiles.yml` currently has `schema: RAW` via the env var as a placeholder. `dbt debug` is safe with this (no materialization), but before any `dbt run` lands a real model we need a custom `generate_schema_name.sql` macro plus `+schema:` per folder so staging/intermediate/warehouse/marts go to their own schemas (not `RAW_STAGING` etc). First step of Phase 4 session 2.
 
-**Next session (Phase 4 session 2):**
-
-1. Per-layer schema separation — `macros/generate_schema_name.sql` + `+schema:` per folder in `dbt_project.yml`. **Must happen before any `dbt run`.**
-2. `sources.yml` declaring CALENDAR / SELL_PRICES / SALES_TRAIN as the M5 source. Column documentation + freshness checks against `loaded_at`. Verify with `dbt source freshness`.
-3. First two staging models — `stg_m5_calendar` and `stg_m5_sell_prices`. Lower complexity — type casting, renaming, no shape change. Adds first dbt tests (`unique`, `not_null` on PK columns).
-4. `stg_m5_sales_train` — the substantive staging model. RAW is already long (pandas.melt during Phase 1 load); staging joins to `stg_m5_calendar` to translate `d_NNNN` strings to real DATEs. This `sale_date` is what `fact_daily_sales` will eventually cluster on.
-5. `dbt build`, verify all green, 10-point code-quality audit, doc updates + commit.
-
 ---
 
-**Last action (2026-05-15 — Phase 3 session 2):** Added `verify_one_day` task downstream of `extract_one_day` in `m5_daily_extract`. Three independent Snowflake-side checks (CALENDAR = 1 row, SELL_PRICES > 0, SALES_TRAIN > 0) batched into one SQL round-trip. **Caught a real silent failure within 10 minutes of deployment** — today's `2026-05-15` auto-fire (no M5 data for that date) returned 0 rows from extract without error; verify queried Snowflake, found 0 rows on all three checks, raised RuntimeError, task square went red. Pipeline correctly reported "the data did not actually land." UI trigger form enabled via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true`; 20-minute UI gotcha around play-arrow vs `w/ config` buttons documented in LEARNINGS. Test trigger for `2014-01-04` via UI form: extract + verify both green end-to-end.
+**Last action (2026-05-15 — Phase 3 session 2):** Added `verify_one_day` task downstream of `extract_one_day` in `m5_daily_extract`.
+
+- Three independent Snowflake-side checks (CALENDAR = 1 row, SELL_PRICES > 0, SALES_TRAIN > 0) batched into one SQL round-trip.
+- **Caught a real silent failure within 10 minutes of deployment** — today's `2026-05-15` auto-fire (no M5 data for that date) extracted 0 rows without error; verify queried Snowflake, found 0 rows, raised RuntimeError, task square went red. Pipeline correctly reported "data did not actually land."
+- UI trigger form enabled via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true`; 20-minute UI gotcha around play-arrow vs `w/ config` buttons documented in LEARNINGS. Test trigger for `2014-01-04` via UI form: extract + verify both green end-to-end.
 
 **Files added this session (Phase 3 session 2):**
 
@@ -206,14 +247,6 @@
 - **The wake helper earned its keep on its first real run.** When the manual smoke test ran in PowerShell after lunch, Azure SQL had auto-paused; `wake_azure_sql` caught 40613, slept 45s, retried, succeeded. Exactly the failure mode predicted in `LEARNINGS` during Phase 2 session 3 — now covered.
 - **Code-quality framework grew during the session.** Yellow Pylance squigglies on the freshly-written DAG file revealed the original 9 criteria didn't cover dev-environment hygiene. Added criterion 6 and renumbered the rest. The framework now catches this class of issue going forward.
 - **Mid-session pacing refinement.** Phil pushed back on "lots of changes summarised in bullets, hard to follow." `TEACHING_PREFERENCES.md` updated twice to capture an explicit rule for inline code display (path + line numbers + before/after for code-shaped files; description-only for doc-shaped).
-
-**Next session (Phase 3 session 2) — Airflow polish + scheduled-run observation:**
-
-- Toggle DAG back off between sessions OR let the daily schedule walk forward and observe live. If left running, by next session there should be 1-3 additional auto-fired runs in the metadata DB (2026-05-15, 16, 17), which is itself useful as a demo of "Airflow runs by itself."
-- Add a downstream Snowflake-side verification task to the DAG. Two-task DAG: `extract_one_day` → `verify_one_day`. The verify task queries Snowflake and confirms the row count matches what the script reported. Closes the loop inside Airflow rather than relying on a manual SQL run.
-- Consider `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS=true` in docker-compose so future manual triggers can use the UI form (with calendar date picker) rather than the CLI. Requires `down`+`up` cycle to take effect.
-- Document the run in the README's architecture diagram so the new Airflow section in the public README has a concrete example of an Airflow-orchestrated extract.
-- Stretch: VS Code Dev Containers as a Phase 6 polish item — attaches the editor *into* the running Airflow container, eliminating any Windows-host vs Linux-runtime drift. Real-DE-shop pattern, strong interview talking point.
 
 ---
 
@@ -315,16 +348,6 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 
 **Phase 2 closed.** Phase 3 (Airflow) opens the next session.
 
-### Quick start for Phase 3 session 1 (Airflow)
-
-```powershell
-cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
-.\.venv\Scripts\Activate.ps1
-# Re-anchor Claude on PROJECT_CONTEXT.md + TEACHING_PREFERENCES.md + LEARNINGS.md
-# Verify Docker Desktop is running: docker --version
-# Then start building docker-compose.yml for the Airflow stack.
-```
-
 ---
 
 ## Phase 3 progress
@@ -389,41 +412,6 @@ cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
 8. ✅ Two mid-session `TEACHING_PREFERENCES.md` refinements after Phil pushed back on verbosity: (a) **comments-above-the-line** for inline code explanations (never end-of-line — horizontal scroll in chat breaks reading flow); (b) **three-layer pattern** for every code-shaped file going forward — verbose-in-chat + clean-on-disk + walkthrough-md-alongside.
 9. ✅ `DBT_PIPELINE.md` created as the first instance of the three-layer pattern (matches Phase 2's `EXTRACT_PIPELINE.md`). Covers dbt big picture, five-layer architecture, project layout, line-by-line walkthroughs of `dbt_project.yml` and `profiles.yml`, the `.env` loading prerequisite, and `dbt debug` verification. Will be extended each session.
 10. ✅ `LEARNINGS.md` dbt section populated with 10 substantive entries.
-
-### Quick start for Phase 4 session 2
-
-```powershell
-# 1. Move into the project + activate venv
-cd C:\Users\Phil\Documents\Claude\Projects\retail-demand-forecasting-project
-.\.venv\Scripts\Activate.ps1
-
-# 2. Re-anchor Claude on (in order):
-#    PROJECT_CONTEXT.md  → TEACHING_PREFERENCES.md
-#    LEARNINGS.md        → PROJECT_PLAN.md
-#    DBT_PIPELINE.md     ← new this phase, the dbt walkthrough
-
-# 3. Load .env into the PowerShell session — REQUIRED before any dbt command
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^([A-Z_][A-Z0-9_]*)=(.*)$') {
-        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
-    }
-}
-
-# 4. Sanity-check dbt is still healthy
-cd dbt
-dbt debug   # expect: All checks passed!
-```
-
-**First Phase 4 session 2 step:** wire up per-layer schema separation
-(custom `macros/generate_schema_name.sql` + `+schema:` per folder in
-`dbt_project.yml`) — **must happen before any `dbt run`**. Then
-`sources.yml` for the three RAW tables (CALENDAR, SELL_PRICES,
-SALES_TRAIN) with `loaded_at` freshness checks. Verify with
-`dbt source freshness`. Then first staging models.
-
-Airflow stack does **not** need to be running for Phase 4 work — dbt
-talks to Snowflake directly. Boot Docker only if you want to demo
-a DAG run.
 
 ---
 

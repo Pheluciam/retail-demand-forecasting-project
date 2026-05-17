@@ -2,7 +2,7 @@
 
 > A production-grade retail demand-planning analytics platform built on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 Forecasting) is ingested from Azure SQL Database into Snowflake via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
-**Status:** 🚧 In development — Phase 4 in flight (dbt transformations starting): dbt project scaffolded with `dbt-snowflake`, `profiles.yml` using `env_var()` for production-grade secrets handling, Snowflake connection verified end-to-end with `dbt debug`. Phases 0–3 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min), Airflow orchestration live with `extract_one_day` → `verify_one_day` task chain catching silent failures inside the DAG. Staging layer + Kimball star schema next.
+**Status:** 🚧 In development — Phase 4 in flight (dbt warehouse layer complete; marts next): full Kimball star schema shipped — `dim_calendar`, `dim_item`, `dim_store`, and incremental `fact_daily_sales` (32.9M rows, $93.5M total revenue, 58 dbt tests, full DAG green in 15.26s). Phases 0–3 complete: Azure SQL source loaded with M5 data (1,969 calendar rows + 6.8M sell_prices + 59.18M sales_train), 3-year backfill landed in Snowflake (35.6M rows in 27.3 min), Airflow orchestration live with `extract_one_day` → `verify_one_day` task chain catching silent failures inside the DAG. Marts layer (one per Power BI page) next.
 
 ---
 

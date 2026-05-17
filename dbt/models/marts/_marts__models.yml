@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: mart_executive_overview
+    description: "Pre-aggregated daily summary for the Power BI dashboard home page. Grain: one row per sale_date. Roll-up of fact_daily_sales — ~32.9M fact rows collapse to ~1,148 mart rows. Lean-mart pattern: NO denormalised date attributes (Power BI joins dim_calendar for year/quarter/is_weekend/is_holiday slicing). 'Active' counts exclude on-shelf-didn't-sell rows. See DBT_PIPELINE.md → 'mart_executive_overview' for the full walkthrough."
+
+    columns:
+
+      - name: sale_date
+        description: "Date of the daily summary. PK at this grain."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: total_units_sold
+        description: "SUM(units_sold) across all item × store rows for the date. Cannot be NULL — units_sold is not_null at the fact level."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: total_revenue_usd
+        description: "SUM(revenue_amount_usd) across all priced rows for the date. SUM ignores NULL-price rows (~34.66% of the fact) — they contribute zero, which is the right 'unknown revenue, not zero revenue' semantic. not_null is enforced at the aggregate level: a NULL daily total would mean an entire day's pricing is missing upstream and should fire loudly."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: active_item_count
+        description: "COUNT(DISTINCT item_id) where units_sold > 0. Items that actually sold something that day. Excludes on-shelf-didn't-sell rows."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 3049
+                inclusive: true
+
+      - name: active_store_count
+        description: "COUNT(DISTINCT store_id) where units_sold > 0. Stores that recorded at least one sale that day. M5 has 10 stores total (4 CA + 3 TX + 3 WI)."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 10
+                inclusive: true
