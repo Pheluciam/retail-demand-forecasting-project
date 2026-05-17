@@ -104,9 +104,9 @@ Sessions are ~2–3 hours each. Times are honest estimates including troubleshoo
 | **Phase 2 — Snowflake + extraction** | 2–3       | Snowflake free trial signed up (clock starts). Warehouse / database / schema / role provisioned. Python extract-and-load job: MS SQL → Snowflake staging via `pyodbc` → Pandas → `snowflake-connector-python` → `COPY INTO`. **Extract is date-parameterised from day 1** (takes a `run_date` arg). Test single-table extract first, then all-tables                                     | All 6 raw tables landed in Snowflake `RAW` schema; extract script accepts a date param |
 | **Phase 3 — Airflow orchestration**  | 2         | Airflow Docker compose stack up locally. First DAG: extract MS SQL → load Snowflake → run on schedule, **passing `{{ data_interval_start }}` to the date-parameterised extract so each run picks up one new day of M5 history (simulated freshness)**. Failure handling and email/log alerts. Containerise the Python extract job. Manual trigger and scheduled trigger both validated   | Working DAG runs end-to-end on schedule, advancing one M5 day per run                  |
 | **Phase 4 — dbt transformations + orchestration**    | 5–6       | dbt-snowflake configured. Sources defined. **Staging layer** (M5 already long from Python load). **Intermediate layer**: `int_sales_with_prices`. **Warehouse layer**: `dim_item`, `dim_store`, `dim_calendar`, `fact_daily_sales` (incremental, clustered on `sale_date`). dbt tests on every dim's primary key. Surrogate keys via `dbt_utils.generate_surrogate_key`. **Marts layer (lean):** `mart_executive_overview` only — pre-aggregated daily summary for the home page. Other Power BI pages slice the warehouse star directly. See `LEARNINGS.md` "Lean marts layer" entry. **Phase 4 closes with Airflow ↔ dbt wiring via Astronomer Cosmos** (session 6) so each dbt model becomes its own Airflow task in the existing `m5_daily_extract` DAG, with full lineage visible in the Airflow UI. | Full dbt project building cleanly with passing tests + Airflow-orchestrated dbt build |
-| **Phase 5 — Power BI**               | 2–3       | Snowflake native connector configured. Five marts loaded. Relationships established (single-direction Many-to-One). Five pages built: Executive Overview, Demand by Hierarchy, Promotion & Price Analysis, Seasonality & Calendar, Forecast vs Actual. Cross-page sync slicers. Drill-throughs. Format painter pass for consistency. DAX measures explicit (not implicit). Theme applied | Polished `.pbix` file with 5 pages                                                     |
-| **Phase 6 — Polish & ship**          | 1–2       | README expanded with architecture diagram, screenshots, "how to run" section, business problem statement, tech-stack rationale. `LEARNINGS.md` final pass. Stretch: GitHub Actions CI workflow with `dbt parse`, tests, `sqlfluff` lint. Tag `v1.0` release. Public repo confirmed                                                                                                       | Shippable portfolio piece                                                              |
-| **Total**                            | **12–16** |                                                                                                                                                                                                                                                                                                                                                                                          |                                                                                        |
+| **Phase 5 — Power BI + forecasting**  | 5–6       | Snowflake native connector configured (DirectQuery vs Import evaluated empirically per page). Power BI semantic model with relationships from `WAREHOUSE.fact_*` + `dim_*` (lean-marts pattern). **All five pages fully built**: Executive Overview (from `mart_executive_overview`), Demand by Hierarchy, Promotion & Price, Seasonality & Calendar, Forecast vs Actual. **Forecasting layer built end-to-end** — time-series forecasts via Snowflake Cortex ML functions (or Python statsmodels / Prophet — decided session 5 open), results written back to Snowflake, new `mart_forecast_vs_actual` dbt model joining forecasts to fact, `is_incremental` patterns where appropriate. Full DAX measure library (time intelligence, period-over-period, dynamic top-N, dynamic format strings). Cross-page sync slicers, drill-throughs, theme. Performance tuning (VertiPaq compression analysis, BI-side aggregations if needed). `POWERBI_PIPELINE.md` walkthrough doc shipped matching EXTRACT_PIPELINE / DBT_PIPELINE depth | Polished `.pbix` file with 5 fully-built pages including working forecasts + new mart |
+| **Phase 6 — CI/CD + ship**            | 2–3       | README expanded with architecture diagram, screenshots of all 5 Power BI pages, "how to run" section, business problem statement, tech-stack rationale, key learnings. **GitHub Actions CI fully wired** (no longer stretch): `dbt parse` + `dbt test` + dbt slim CI (only changed models + downstream) + `sqlfluff` lint + markdown lint, green badge in README. **`dbt docs generate` hosted on GitHub Pages** (no longer stretch). `LEARNINGS.md` final pass + "What I'd do differently next time" populated. Final closing 10-point + phase-boundary structural audit across the whole project. Tag `v1.0` release. Public repo confirmed | Complete portfolio-grade project, all stretch goals shipped as baseline |
+| **Total**                            | **18–23** |                                                                                                                                                                                                                                                                                                                                                                                          |                                                                                        |
 
 ---
 
@@ -153,44 +153,47 @@ These are non-negotiable from day 1, locked from `LEARNINGS.md` carry-forward se
 | UTF-8 / encoding bugs (Project #1 repeat)                   | Low        | Medium | Explicit `encoding='utf-8'` on all Python file ops. `nvarchar` (not `varchar`) in MS SQL Server        |
 | Naming inconsistency drift                                  | Medium     | Medium | Conventions table above is committed to repo Phase 0. No exceptions                                    |
 | Airflow first-time-setup pain                               | High       | Medium | Use Astronomer's official `docker-compose.yml` template — well-documented, low-friction starting point |
-| Scope creep (forecasting ML, weather API, more pages)       | High       | Medium | This document is the contract. Anything not listed is Project #3 candidate or stretch goal             |
+| Scope creep (weather API, additional pages, lakehouse)      | Medium     | Medium | **Updated 2026-05-17**: forecasting is now in-scope (M5 is literally a forecasting dataset; deferring it weakens the portfolio narrative). Weather API, additional pages, lakehouse architecture remain out-of-scope and reserved for Project #3. This document is the contract |
 | Auto-detected relationships in Power BI (Project #1 repeat) | Medium     | Low    | Disable autodetect on first model load. Manage Relationships pass after every refresh                  |
 
 ---
 
 ## Definition of "shippable"
 
-Project #2 ships when **all of these** are true:
+Project #2 ships when **all of these** are true (updated 2026-05-17 — former stretch goals promoted to baseline; full scope locked in):
 
 - Pipeline runs end-to-end automatically (Airflow scheduled, not button-pressed)
 - All dbt models have at least basic tests; tests pass
 - Cloud warehouse (Snowflake), not local
 - Architecture diagram in README (the Mermaid block above)
 - README explains the business problem, the architecture, and how to run it
-- At least one screenshot OR live link of the Power BI dashboard
+- Screenshots of **all five** Power BI pages in the README (not just one)
+- All five pages fully built — Executive Overview, Demand by Hierarchy, Promotion & Price, Seasonality & Calendar, **Forecast vs Actual with working forecasts** (not stubbed)
+- Forecasting layer built end-to-end — model trained or Cortex invoked, results written back to Snowflake, joined to fact via `mart_forecast_vs_actual`
 - `LEARNINGS.md` populated through the project (not just end)
 - Repo public on GitHub from day 1
+- **GitHub Actions CI passing on `main` branch** (green badge in README)
+- **`dbt docs generate` hosted on GitHub Pages**
 - Tagged `v1.0` release
 
-**Stretch goals** (nice but not required for shippable):
+**Remaining stretch goals** (genuinely optional, would not block shipping):
 
-- CI passing on `main` branch (green badge in README)
-- Power BI Service live link instead of screenshots
-- `dbt docs generate` hosted on GitHub Pages
-- `.env` secrets via Airflow connections (not file-based)
+- Power BI Service live link (in addition to screenshots)
+- `.env` secrets migrated to Airflow Connections (refactor, not feature)
+- `dbt-snowflake` upgrade to whatever the latest minor is at v1.0 time
 
 ---
 
 ## What this project deliberately does NOT do
 
-To avoid scope creep, these are out:
+To avoid scope creep, these remain out (updated 2026-05-17 — forecasting removed from this list and moved into Phase 5 in-scope):
 
-- **Forecasting modelling pipeline** (Prophet, ML models) — surfacing only. Defer to Project #3 if applicable
-- **Streaming / real-time** ingestion. Batch monthly (or weekly) is the headline
+- **Streaming / real-time** ingestion. Batch daily is the headline cadence
 - **Multiple cloud providers.** Snowflake on AWS-backed default region; nothing on Azure/GCP simultaneously
 - **API ingestion.** Reserved for Project #3
 - **Lakehouse / medallion architecture.** Reserved for Project #3
 - **Multiple BI tools.** Power BI only — Tableau or Looker are scope creep here
+- **Deep ML / hyperparameter tuning.** The forecasting layer uses one or two well-chosen out-of-the-box methods (Snowflake Cortex ML functions, or Prophet / exponential smoothing in Python); model evaluation is included but bake-off / extensive feature engineering is reserved for any future ML-specific project
 
 ---
 
@@ -207,6 +210,6 @@ To avoid scope creep, these are out:
 
 |                  |                                                                        |
 | ---------------- | ---------------------------------------------------------------------- |
-| **Phase**        | Phase 4 — **closed** (Airflow ↔ dbt integration via Astronomer Cosmos shipped end-to-end in session 6; DAG extended to 4-stage chain with per-model task generation; failure-injection test confirmed clean chain halt); Phase 5 session 1 next (Power BI dashboard build) |
+| **Phase**        | Phase 4 — **closed**. Phase 5 next: Power BI + forecasting (5-6 sessions, full scope locked 2026-05-17 — no optionals, no deferred items). Then Phase 6: CI/CD + ship (2-3 sessions, former stretch goals promoted to baseline). Total project: 18-23 sessions; ~12-14 sessions done so far; ~7-9 sessions remaining |
 | **Last updated** | 2026-05-17                                                             |
 | **Next step**    | See `PROJECT_CONTEXT.md` → "Where we are right now" for the live state |

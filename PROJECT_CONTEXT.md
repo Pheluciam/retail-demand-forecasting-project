@@ -2,7 +2,7 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-17 (Phase 4 session 6 closed — Airflow ↔ dbt integration via **Astronomer Cosmos**. DAG extended from 2 tasks to 4: `extract_one_day → verify_one_day → [dbt_models task group, 18 auto-generated tasks] → verify_dbt_one_day`. Cosmos parses the dbt project at DAG-parse time and generates one Airflow task per dbt model + per test, with per-model lineage visible in the Airflow Graph view. End-to-end manual trigger for logical_date 2014-03-23 (ds 2014-03-22) ran all 4 stages green in 5:31. Failure-injection test confirmed clean chain halt via `upstream_failed` propagation. **Phase 4 complete.** Next: Phase 5 session 1 = Power BI dashboard build).
+> Last updated: 2026-05-17 (Phase 4 session 6 closed — Airflow ↔ dbt integration via **Astronomer Cosmos**. DAG extended from 2 tasks to 4: `extract_one_day → verify_one_day → [dbt_models task group, 18 auto-generated tasks] → verify_dbt_one_day`. Cosmos parses the dbt project at DAG-parse time and generates one Airflow task per dbt model + per test, with per-model lineage visible in the Airflow Graph view. End-to-end manual trigger for logical_date 2014-03-23 (ds 2014-03-22) ran all 4 stages green in 5:31. Failure-injection test confirmed clean chain halt via `upstream_failed` propagation. **Phase 4 complete.** Scope-expansion decision locked end-of-session: **Phase 5 + Phase 6 now run with full scope (no optionals)** — forecasting layer + GitHub Actions CI + dbt docs on GitHub Pages all promoted from stretch to baseline. Phase 5 expanded from 2-3 sessions to 5-6; Phase 6 from 1-2 to 2-3. Next: Phase 5 session 1 = Snowflake connection + Home page + semantic model in Power BI).
 
 ---
 
@@ -38,17 +38,24 @@
 - **One self-inflicted UI mistake captured as a teaching-discipline lesson** (page-level vs panel-level trash icon confusion → DAG history wipe). Cosmetic loss only; DAG file untouched, Snowflake data untouched. The discipline rule going forward — "name the EXACT screen region a button is in, not just the button shape" — is now a durable LEARNINGS entry.
 - **Headline metrics**: 4 outer task squares green for 2014-03-22 trigger; 21 total tasks in the DAG (3 @tasks + 18 auto-generated dbt tasks); 5:31 end-to-end DAG run duration; 78 dbt test assertions running inside 9 model-level test tasks; all 9 row-count checks in verify_dbt_one_day passing on the success run.
 
-**Phase 4 complete. Next session (Phase 5 session 1) — Power BI dashboard build:**
+**Phase 4 complete. Next: Phase 5 (Power BI + forecasting) — full scope locked 2026-05-17, no optionals:**
 
-The pipeline now stands end-to-end with Airflow orchestration, dbt transformations, and Snowflake as the analytical warehouse. The next deliverable is the Power BI dashboard layer.
+The pipeline now stands end-to-end with Airflow orchestration, dbt transformations, and Snowflake as the analytical warehouse. Phase 5 ships the Power BI dashboard layer + the forecasting layer that feeds the Forecast vs Actual page. Phase 6 then closes the project with CI/CD + final polish. Both phases now run with everything baseline (former stretch goals promoted). See `PROJECT_PLAN.md` → "Session-by-session timeline" + "Definition of shippable" for the locked contract.
 
-1. **Power BI connection to Snowflake.** Native Snowflake connector with DirectQuery vs Import-mode evaluation; settle on the right pattern for the data volumes (~1k mart rows on the home page; ~32.9M fact rows for slicing pages).
-2. **Five-page dashboard build.** Under the lean-marts pattern adopted in session 5, the warehouse star (fact + dims) is the analyst-facing surface for slicing pages, and `mart_executive_overview` powers the home page. Build relationships and DAX measures in Power BI's model view.
-3. **Page-level design.** Home (executive overview from the mart) → Demand by Hierarchy → Promotion & Price → Seasonality & Calendar → Forecast vs Actual (deferred until forecasts exist).
-4. **DAX measure library.** Time intelligence, period-over-period comparisons, dynamic top-N filtering. Carry-forward from Project #1 (CDC NT Transport's measure library).
-5. **Sliceability + drill-throughs.** Cross-page navigation, calendar-based slicers, store/state/category filters.
-6. **Performance tuning.** VertiPaq compression checks; aggregation strategies for the 32.9M-row fact in DirectQuery vs Import mode.
-7. **Doc updates + closing audit at session end.** A new `POWERBI_PIPELINE.md` walkthrough doc to match the EXTRACT_PIPELINE / DBT_PIPELINE pattern.
+**Phase 5 session-by-session breakdown (5-6 sessions):**
+
+1. **Session 5.1 — Snowflake connection + Home page + semantic model.** Native Snowflake connector with DirectQuery vs Import evaluation; settle the pattern empirically per page (~1k mart rows on home, ~32.9M fact rows on slicing pages). Build the semantic model: `WAREHOUSE.fact_*` + `dim_*` relationships under the lean-marts pattern; disable autodetect on first load (Project #1 carry-forward). Build the Home page from `mart_executive_overview`.
+2. **Session 5.2 — Demand by Hierarchy + Promotion & Price pages.** Two slicing pages off the warehouse star, plus their page-specific DAX measures.
+3. **Session 5.3 — Seasonality & Calendar page + forecasting research.** Calendar-based page with weekend / holiday slicers via `dim_calendar`. Then research/decide the forecasting approach: Snowflake Cortex ML functions (most current, leans into the Snowflake stack) vs Python (statsmodels/Prophet, more portable). Lock the choice in this session.
+4. **Session 5.4 — Build the forecasting layer end-to-end.** Train or invoke whatever's chosen in 5.3 → write results back to Snowflake → new `mart_forecast_vs_actual` dbt model joining forecasts to fact at sale_date grain, with appropriate tests. Verify SQL artefact `10_phase5_mart_forecast_vs_actual_verification.sql` follows the `04_`–`09_` pattern.
+5. **Session 5.5 — Forecast vs Actual page + full DAX measure library.** Build the fifth page from the new mart. Round out the DAX measure library: time intelligence (YTD/QTD/MTD), period-over-period comparisons (YoY, vs forecast), dynamic top-N filtering, dynamic format strings.
+6. **Session 5.6 — Cross-page drill-throughs + performance tuning + `POWERBI_PIPELINE.md` + closing audit.** Global slicers across pages, drill-through actions, theme polish via format painter, VertiPaq compression analysis, BI-side aggregations if needed. New `POWERBI_PIPELINE.md` walkthrough doc matching EXTRACT_PIPELINE / DBT_PIPELINE depth. 10-point + phase-boundary structural audits. Bundled commit + push closes Phase 5.
+
+**Phase 6 — CI/CD + ship (2-3 sessions):**
+
+1. **Session 6.1 — GitHub Actions CI fully wired.** `dbt parse` + `dbt test` on every PR + dbt slim CI (only changed models + downstream) + `sqlfluff` lint with project-specific rules + markdown lint. Green badge in README. Workflows live in `.github/workflows/`.
+2. **Session 6.2 — `dbt docs generate` hosted on GitHub Pages + Power BI screenshots + README final polish.** `dbt docs serve` artefacts deployed via GitHub Pages action. All five Power BI page screenshots dropped into README. "How to run this" section populated with end-to-end setup. "Key learnings" section curated from LEARNINGS.md highlights.
+3. **Session 6.3 — Final closing audits + v1.0 tag.** Project-wide 10-point + phase-boundary structural audit (catches anything that's drifted across the whole repo). Tag `v1.0` release, verify public repo on GitHub renders cleanly. **Project ships.**
 
 ---
 
