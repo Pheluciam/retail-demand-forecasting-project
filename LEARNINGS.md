@@ -198,6 +198,20 @@ Disk file existing ≠ SQL has been run. The two must be reconciled: write to di
   - Independent SQL queries against both databases (`sql/snowflake/02_extract_smoke_tests.sql` Section 5 + `sql/verify/02_phase2_extract_verification.sql`) — all three tables `OK / OK / OK`.
 - **Zero retries fired during the run.** No 40613 errors mid-stream, no transient HTTP disconnects mid-PUT. (Did hit one 40613 on the very first connect attempt — see Mistakes & diagnoses.)
 
+### 2026-05-18 — Snowflake metadata visibility ≠ access boundary
+
+Discovered during Phase 5 session 1 while connecting Power BI Desktop. PBI's Navigator under the dedicated `POWERBI_READER` role showed *all 7 schemas* in `RETAIL_DB` (`INFORMATION_SCHEMA`, `INTERMEDIATE`, `MARTS`, `PUBLIC`, `RAW`, `STAGING`, `WAREHOUSE`) — even though the role only had USAGE on `WAREHOUSE` and `MARTS`. Surprising; looked like a privilege leak. Diagnosed via `INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER('PHELUCIAM')`, which proved every PBI metadata query (`SHOW SCHEMAS IN "RETAIL_DB"`, `SHOW DATABASES`, etc.) ran under `POWERBI_READER` — the role pin worked at the session level.
+
+**The real behavior**: Snowflake's `SHOW SCHEMAS IN DATABASE` returns *every schema name* in a database the role has DB-level USAGE on, **regardless of per-schema privileges**. Schema-level USAGE controls whether you can OPEN the schema and READ tables inside it — not whether the schema name appears in catalog listings. The metadata layer is broadly readable; the access layer is privilege-gated.
+
+**Visitor-badge analogy.** Walk into a building with a visitor pass. The elevator directory lists *every floor*: Marketing, Engineering, Executive, etc. That listing isn't a security hole; it's just signage. The badge readers on each individual floor's door are what enforce who can actually enter. Snowflake's `SHOW SCHEMAS` is the directory; the USAGE/SELECT grants are the badge readers.
+
+**How we proved the boundary holds anyway**: `SELECT COUNT(*) FROM RETAIL_DB.RAW.M5_SALES_TRAIN` under `POWERBI_READER` failed with "Object does not exist or not authorized" — exactly as designed. PBI's Navigator showing the RAW schema name in the tree is cosmetic; if you'd tried to expand it and tick a table to load, the load itself would have errored with the same auth message.
+
+**Carry-forward**: when a Snowflake catalog listing looks broader than expected, the question to ask is not "what did the GRANTs miss?" but "does an actual SELECT against the surprising object succeed?" Metadata is broadly readable; access is the boundary. Same pattern likely holds in BigQuery, Databricks Unity Catalog, and other modern warehouses. Project #3 carry-forward.
+
+**Diagnostic technique worth banking**: `INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER('<user>')` filtered to the last N minutes is the canonical way to verify what role any connecting tool is actually using — beats guessing-from-symptoms decisively. Add this to the Project #3 troubleshooting toolkit early.
+
 ### Airflow
 
 **Stack architecture choices (2026-05-14, Phase 3 session 1)**
@@ -422,6 +436,35 @@ The tooltip on the upstream_failed task confirmed: `Duration: 00:00:00`, `Trigge
 | `none_failed` | Run if no upstream failed (success or skipped) |
 
 `all_done` is useful for cleanup tasks (always run, even after pipeline failure). `one_success` is useful for "any one of these branches has the data we need" patterns. For verify-gate tasks like `verify_dbt_one_day`, the default `all_success` is exactly right.
+
+### 2026-05-18 — DAG state ownership: the scheduler tracks "where we're up to," not me
+
+Came up during Phase 5 session 1 while thinking about the interview demo. The manual-trigger UX during testing — typing a date into the form every time — created the wrong mental model: that I was responsible for remembering which date the DAG was up to. I'm not. Airflow is.
+
+**The actual state model.** Airflow's metadata DB records every DAG run — `logical_date`, start time, end time, final state — and the scheduler reads that table to decide what to run next. With `schedule="@daily"` + `catchup=False`, an unpaused DAG fires exactly one new run per scheduled interval going forward, regardless of how many intervals were missed while paused. The scheduler maintains the cursor; I just look at it.
+
+**Three places the cursor is visible** (any one is enough to answer "what's the next date to run?"):
+
+| Surface | How to read it |
+|---|---|
+| **Airflow UI → Grid view** | Each column = a `logical_date`. Rightmost green square = latest success. Next date to run = column one to the right. Screenshot-ready for interview/portfolio. |
+| **`SELECT MAX(sale_date) FROM RETAIL_DB.WAREHOUSE.FACT_DAILY_SALES`** | Snowflake's view of the truth. After session 6's two runs this returns `2014-03-23`. Next date to process = MAX + 1 = `2014-03-24`. Survives even if Airflow's metadata DB is wiped. |
+| **`airflow dags list-runs -d m5_daily_extract`** (CLI) | The same data the Grid view renders, tabular. Useful in scripted environments / over SSH. |
+
+**Why I'd been "putting in dates" anyway.** Manual UI triggers (the trigger-with-config form) are for *testing specific dates without waiting* — backfills, replays, demos. That's a dev-time affordance, not the prod control surface. In production the DAG runs untouched on its schedule; nobody types a date in.
+
+**`catchup=False` is a deliberate design call worth defending in interviews.** With `catchup=True` (Airflow's default), unpausing this DAG today would queue ~2.5 years of runs back-to-back and burn Snowflake credits in one burst. With `catchup=False`, only one run fires per real day going forward — the "simulated freshness" pattern, where the DAG advances one M5 date per real-world midnight. Bounded-backfill datasets like M5 should default to `False`; rolling-window datasets (sensor data, transactional logs) often want `True`.
+
+**Two power moves to keep banked**:
+
+- **Backfill on demand.** `airflow dags backfill m5_daily_extract -s 2014-03-24 -e 2014-03-26` (CLI) fires three dates back-to-back from a known start to end. Useful for "the upstream data was corrected — replay the last week" scenarios. Makes a strong mid-demo move because it shows the scheduler picking up exactly where it left off.
+- **Pause / unpause.** Toggling the DAG off in the UI freezes the cursor in place. Unpausing resumes from the next-unfilled interval, not from a "rewind 5 days" position. The cursor never drifts.
+
+**Interview talk-track sentence**:
+
+> *"Airflow's scheduler owns the state, not me. The metadata DB tracks every run; the Grid view renders it. I set `catchup=False` deliberately because for this simulated-freshness pattern I want one date per real day, not a 2.5-year burst at unpause. Backfills and replays go through the CLI when I need them — pause/unpause never loses the cursor."*
+
+**Carry-forward to Project #3**: every scheduler-driven DAG has three "where are we up to" surfaces — the scheduler's own state, the data destination's MAX-of-watermark column, and a CLI introspection command. Wire all three explicitly so a question about pipeline state has a 30-second answer regardless of who's asking. Avoid mental models that put state in your head.
 
 ### dbt (advanced from Project #1)
 
@@ -935,8 +978,86 @@ Reverted the YAML edit post-test so the project state is clean.
 
 ### Power BI (advanced from Project #1)
 
-_(to be populated during Phase 5 — explicit DAX measures, cross-page slicers,
-drill-throughs, format painter, themes)_
+### 2026-05-18 — Explicit DAX measures over implicit aggregations
+
+Phase 5 session 1 discipline rule, locked from the first Card on the Executive Overview page. Every measure displayed on the dashboard is a named DAX measure (`Total Revenue`, `Total Units Sold`, `Active Items`, `Active Stores`), not a column dragged onto a visual with PBI's default Σ aggregation.
+
+**The difference**: dragging `MART_EXECUTIVE_OVERVIEW[total_revenue_usd]` directly onto a Card creates an **implicit measure** — an unnamed throwaway `SUM()` that exists only inside that one visual. Five visuals using the same column = five separate throwaway aggregations, none named, none reusable, format settings applied per-visual.
+
+A **named DAX measure** is the recipe written down once in the head office. Every Card / chart / tooltip / DAX-derived measure that references "Total Revenue" points back to one definition. Change the recipe centrally — formatting, underlying column, even the aggregation type — and every visual everywhere updates next render.
+
+**Recipe-on-the-wall analogy**: implicit measures are chefs cooking "tomato sauce" from memory at every station — slight variations creep in, and if you want to change the recipe you retrain every chef individually. Explicit measures hang the recipe on the wall once; every kitchen reads from it.
+
+**One concrete future-payoff** this enables: time intelligence DAX in session 5.5 (`Total Units Sold YoY`, `Total Units Sold YTD`, `Total Units Sold MTD`) are written as new measures that reference `Total Units Sold` as their base. Like sauces that start with the base tomato recipe. If the base were a throwaway implicit aggregation, every derived measure would have to recreate the base sum inside itself — and any later refactor would touch every derived measure. With the base measure named, the derived measures stay clean.
+
+**Discipline rule for the rest of Phase 5**: every measure used on any visual is created as a named DAX measure via `New measure` first, then referenced. Implicit aggregations (drag-the-Σ-column) are a red flag in code review. Default project-wide.
+
+### 2026-05-18 — Mart→calendar 1:1 cardinality override for star-schema discipline
+
+Hit during the semantic model build in Phase 5 session 1. `MART_EXECUTIVE_OVERVIEW.sale_date` (1,081 unique daily rows) and `DIM_CALENDAR.calendar_date` (1,082 unique dates) connected via drag-and-drop in Model View. PBI auto-detected the cardinality as **One to one (1:1)** because both columns are unique on their respective tables. PBI then **locked the cross-filter direction to "Both"** — no Single option available, no way to override.
+
+**Why "Both" is wrong for this model**: both `FACT_DAILY_SALES` and `MART_EXECUTIVE_OVERVIEW` connect to `DIM_CALENDAR`. With bidirectional cross-filter from mart→calendar, filtering on the mart would cascade *through* `dim_calendar` *into* the fact (because dim→fact has its own filter). Suddenly the mart could filter the fact, which is not the star-schema intent and creates hidden filter chains that produce wrong DAX results later.
+
+**The fix**: manually **override the cardinality dropdown to "Many to one (*:1)"**. PBI shows a benign yellow warning along the lines of *"data integrity may be at risk — unique values detected on both sides"* — accept it. Cross-filter direction then unlocks; set to **Single**.
+
+**Why this is semantically correct even though the data is technically 1:1**: `dim_calendar` is the **conformed dimension** (single source of truth for date attributes — day name, holiday flag, ISO week). The mart is **downstream consumption** of fact data. As new dates land in `dim_calendar` ahead of the mart catching up (e.g. when extract runs but dbt hasn't rebuilt the mart yet), the constraint stays valid as many-to-one. The 1:1 is degenerate in current state, not in design.
+
+**Discipline rule banked**: every relationship from a fact or mart to a conformed dimension should be many-to-one with Single cross-filter direction, regardless of current uniqueness on both sides. Star-schema purity > technical accuracy.
+
+### 2026-05-18 — Power BI dual-axis line charts disable trend lines
+
+Discovered when trying to add trend lines to the Executive Overview revenue + units chart. The chart auto-converted to **dual-axis** when both measures were added to the Y-axis (Total Revenue $40K–$140K range on left axis, Total Units Sold 0K–50K range on right axis — PBI detects scale-difference and splits axes).
+
+In the Analytics pane (the magnifying-glass icon in Visualizations), the available options were: X/Y-Axis Constant Line, Min line, Max line, Average line, Median line, Percentile line, Error bars, Anomalies. **No "Trend line" option.**
+
+**Why**: PBI's trend-line feature requires a single-axis chart with a date/continuous X-axis. Dual-axis combo charts are excluded by design — a single trend line over two different scales would be ambiguous, and per-series trend lines aren't supported in this chart type.
+
+**Workarounds**:
+1. **Split into two single-measure side-by-side charts.** Each chart then has one Y-axis and supports its own trend line via Analytics. Most professional fix for a polished portfolio dashboard.
+2. **Use Min/Max/Average lines as proxies.** Available on dual-axis charts; not a real trend (no slope), but useful for "threshold" or "baseline" annotations.
+3. **Switch to a "Line and clustered column" combo chart** with explicit primary + secondary axes. Different constraints; some versions allow trend on the primary line.
+
+**Banked for Phase 5 session 5.6** (polish pass): if trend lines are wanted for the Home page, split the dual-axis chart into two single-measure charts. Until then, the dual-axis story is clean enough.
+
+**Carry-forward**: PBI's Analytics pane offerings change based on visual type and configuration. Before promising a feature to a stakeholder, check what's actually available in the current chart state.
+
+### 2026-05-18 — Power BI Desktop UI version variance + web-check discipline
+
+Earned by being wrong about it twice during Phase 5 session 1. Power BI Desktop **ships continuous UI updates** — visuals get promoted from preview to default, old ones get hidden, ribbon items move between sections, dialog field labels change. The mental model of "PBI Desktop has X feature in Y location" goes stale fast.
+
+**Concrete examples from this single session**:
+- **"Recent Sources"** in Get Data dropdown — visible in some versions, absent in Phil's. Not a paid-vs-free distinction (Power BI Desktop is universally free); just a version difference.
+- **Data-load progress modal** — shows a row counter in some versions, just a spinner in Phil's. Same version-difference category.
+- **"Card" vs "Card (new)" visual** — initial instruction referenced both as competing options. Web-confirmed: the new Card visual replaced the classic Card as default in **November 2025 GA**; the legacy Card is now hidden in current PBI Desktop unless explicitly toggled on. Phil's Visualizations pane shows only one Card.
+
+**Compounding factor**: "free vs paid" is a misleading frame. **Power BI Desktop is universally free for everyone** — there's no paid Desktop tier. The free/paid split is **Desktop vs Service** (Service is the paid cloud platform for sharing). When a user says "I'm on free Power BI", they almost certainly mean "Desktop only, no Service licence." Practical implication: skip all Service-only steps (scheduled refresh, publishing, workspaces, apps) and assume Desktop has the full feature surface modulo version drift.
+
+**Discipline rule for any PBI walkthrough**: when an instruction references a specific UI element (button, visual, menu path, dialog field, ribbon section), either (a) ask the user to confirm what they see in their version *before* prescribing clicks, or (b) web-check the current state of that UI element rather than asserting from memory. Don't assume the UI Claude knows from training matches what Phil sees today.
+
+**Captured durably in TEACHING_PREFERENCES.md** under Tooling — Claude should re-read at session start for any PBI work.
+
+### 2026-05-18 — `.pbix` file size forced composite-mode decision at git-push time
+
+Caught at session 5.1 close. Initial decision was **full Import** for all 5 tables in the semantic model — dims (small), mart (small), and the **32.9M-row `FACT_DAILY_SALES`** (large but reasoned: "VertiPaq compresses 5–10× and Import unlocks the full DAX surface"). The .pbix saved fine locally, but **`git push` was rejected by GitHub with**:
+
+```
+remote: error: File powerbi/retail_demand_forecasting.pbix is 949.08 MB;
+this exceeds GitHub's file size limit of 100.00 MB
+```
+
+VertiPaq genuinely compressed the row data — 32.9M rows × multiple columns into ~600 MB is decent compression — but **GitHub's 100 MB per-file hard limit** is a real constraint that doesn't care about column-store internals. The `.pbix` is a single binary blob from git's perspective.
+
+**The pivot**: switch `FACT_DAILY_SALES` from **Import** to **DirectQuery**. Composite-mode: fact stays in Snowflake and queries live for fact-driven visuals; dims + mart remain in Import for instant home-page interactivity. **Result**: `.pbix` dropped from **949 MB to 264 KB** — a ~3,600× reduction. Push went through cleanly without Git LFS.
+
+**Mechanics — the trap to avoid**: PBI Desktop **cannot switch a table from Import to DirectQuery via the Properties pane Storage mode dropdown**. The dropdown is greyed out by design (web-confirmed via Microsoft Learn). The valid switches are: DirectQuery → Import (irreversible), DirectQuery → Dual, Import → Dual. Import → DirectQuery requires **delete the table from the model + re-add via Get Data and choose DirectQuery at the load dialog**. Relationships are lost on delete and must be rebuilt afterward (3 fact→dim relationships in our case — quick).
+
+**Reframe for interview talk-track**: this isn't a setback — it's the actual empirical DirectQuery-vs-Import evaluation playing out. The original session plan called for "Native Snowflake connector with DirectQuery vs Import evaluation; settle the pattern empirically per page." That's exactly what happened. The empirical answer for THIS dataset at THIS scale in a git-versioned portfolio repo is **composite mode**, and the story behind it ("I tried full Import first, hit GitHub's 100 MB ceiling, pivoted to composite") demonstrates real operational maturity. *"I empirically evaluated Import vs DirectQuery per table. Small dims + the pre-aggregated mart land in Import for instant interactivity. The 32.9M-row fact stays in Snowflake under DirectQuery — clicks pay sub-second latency rather than baking a near-GB binary into the repo."*
+
+**Three carry-forward principles for Project #3**:
+
+1. **Estimate output artefact size BEFORE the empirical evaluation**, not after. Back-of-envelope: 32.9M rows × ~10 columns × ~30 bytes/value (uncompressed) = ~10 GB raw → VertiPaq 5–10× compression → ~1–2 GB in .pbix → exceeds GitHub by 10×. Would have caught this without the failed push.
+2. **GitHub's 100 MB per-file limit is the hard constraint** for any git-versioned binary deliverable — `.pbix`, `.twbx` (Tableau workbook), `.parquet` snapshots, ML model artefacts. Plan around it from session 1, not session N when the push fails.
+3. **Composite mode is the senior-DE default for any analytics tool consuming both small and large warehouse surfaces.** Small + slow-changing → Import (fast slice/dice, full DAX). Large + slow-changing → DirectQuery (no client storage, latency on click). Large + fast-changing → DirectQuery (freshness). Mixed → composite. Make this an explicit per-table decision, not a project-wide one.
 
 ### Docker
 

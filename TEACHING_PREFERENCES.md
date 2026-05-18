@@ -85,6 +85,7 @@ Three additional failsafes Claude should layer in by default:
 - Not too fast, I want to learn.
 - Not too much explanation, doing will help me learn.
 - **More frequent small-chunk guidance** when learning new tools (especially relevant for Project #2 which introduces several new ones — Azure SQL, Snowflake, Airflow, Docker). Short bullet points, more often. I'll explicitly ask for expansion when I want more depth on something.
+- **UI walkthroughs in any new tool: 1-2 steps per chunk, 2-3 absolute max.** Especially Power BI Desktop. Phil prefers walking through dialogs one screen at a time, not getting a 4+ step plan that requires backtracking when one step lands differently than predicted (different button label, missing field in his free Desktop edition, dialog already showing different state, etc.). Stop after 1-2 steps, wait for confirmation or screenshot, then proceed. The "yell when done" pattern only works for genuinely linear tasks like data loads — not for multi-dialog UI flows. Added 2026-05-18 (Phase 5 session 1).
 
 ## What doesn't work for me
 
@@ -111,6 +112,7 @@ Three additional failsafes Claude should layer in by default:
 - Database client: <pgAdmin 4>
 - Shell: <PowerShell / Git Bash / WSL>
 - Python environment: <venv at dbt_venv\>
+- **BI tool: Power BI Desktop only — NO Power BI Service licence.** Important framing: Power BI **Desktop is universally free**; there is no paid Desktop tier. The free/paid split is **Desktop vs Service** (Service is the paid cloud platform for sharing). Phil has full Desktop, no Service. Practical implications for instructions: no published-to-Service features (scheduled refresh, RLS in Service, workspaces, apps); deliverable is the `.pbix` file + screenshots in README, not a Service link. Claude should never reference Service-only steps for this project. **Separately**, Phil's Desktop UI may differ from Claude's mental model because PBI Desktop ships frequent UI updates (new visuals promoted from preview to default, old ones hidden, ribbon items moved between sections). Examples seen this session: "Recent Sources" not visible in Get Data dropdown; data-load progress shows a spinner not a row counter; the new Card visual replaced the classic Card as default (Nov 2025 GA), so only one "Card" option appears in the Visualizations pane. **Discipline rule**: when an instruction references a specific PBI UI element (button, visual, menu path, dialog field), Claude should either ask Phil to confirm what he sees BEFORE prescribing clicks, or web-check the current state of that UI element rather than asserting from memory. Added 2026-05-18 (Phase 5 session 1).
 
 ## Anything else Claude should know
 

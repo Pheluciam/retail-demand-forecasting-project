@@ -210,6 +210,6 @@ To avoid scope creep, these remain out (updated 2026-05-17 — forecasting remov
 
 |                  |                                                                        |
 | ---------------- | ---------------------------------------------------------------------- |
-| **Phase**        | Phase 4 — **closed**. Phase 5 next: Power BI + forecasting (5-6 sessions, full scope locked 2026-05-17 — no optionals, no deferred items). Then Phase 6: CI/CD + ship (2-3 sessions, former stretch goals promoted to baseline). Total project: 18-23 sessions; ~12-14 sessions done so far; ~7-9 sessions remaining |
-| **Last updated** | 2026-05-17                                                             |
+| **Phase**        | Phase 5 — session 1 **closed**. Power BI Desktop connected to Snowflake under POWERBI_READER role; semantic model built with 4 relationships (lean-marts pattern, autodetect off, manual mart→calendar cardinality override for star-schema discipline); Executive Overview page complete with title + date-range slicer + 4 KPI cards + dual-axis line chart. `.pbix` saved to `powerbi/retail_demand_forecasting.pbix`. Next: Phase 5 session 2 — Demand by Hierarchy + Promotion & Price pages from the warehouse star. Total project: 18-23 sessions; ~13-15 sessions done so far; ~6-8 sessions remaining |
+| **Last updated** | 2026-05-18                                                             |
 | **Next step**    | See `PROJECT_CONTEXT.md` → "Where we are right now" for the live state |
