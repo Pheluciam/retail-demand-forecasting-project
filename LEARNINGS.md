@@ -1036,6 +1036,89 @@ Earned by being wrong about it twice during Phase 5 session 1. Power BI Desktop 
 
 **Captured durably in TEACHING_PREFERENCES.md** under Tooling — Claude should re-read at session start for any PBI work.
 
+### 2026-05-18 — Mart-sourced measures break when sliced by item or store dims
+
+Discovered mid-session in Phase 5 session 5.2 while building the Demand by Hierarchy page. Symptom: a clustered bar chart with `Y-axis = DIM_ITEM[cat_id]` and `X-axis = Sum of MART_EXECUTIVE_OVERVIEW[total_revenue_usd]` showed **the same value ($93.8M) for every category** (FOODS, HOUSEHOLD, HOBBIES).
+
+**Root cause — design-predictable, not a bug.** `MART_EXECUTIVE_OVERVIEW` is a day-grain pre-aggregation with columns `sale_date, total_revenue_usd, total_units_sold, active_item_count, active_store_count`. By lean-marts design, it carries NO item or store identifiers — the fact's `item_id`/`store_id` columns were aggregated away at mart build time. Consequently, the mart has only ONE relationship in the PBI semantic model: `MART.sale_date → DIM_CALENDAR.calendar_date`. No relationship to `DIM_ITEM`, none to `DIM_STORE`. When a visual filters by `DIM_ITEM[cat_id]`, the filter has no path to the mart, so no filtering occurs — every slice gets the mart's grand total.
+
+**Why this was a fresh discovery.** Session 5.1 built only the Executive Overview page using mart measures and `DIM_CALENDAR` slicers — the calendar relationship existed, so date-range slicing worked correctly and the bug was invisible. The hidden constraint was *"mart measures only work when sliced by calendar-related fields."* Page 1 happened to satisfy that constraint; pages 2-5 don't.
+
+**The mart's own schema YAML comment anticipated the constraint** (`_marts__models.yml` line 5: "NO denormalised date attributes (Power BI joins dim_calendar for year/quarter/is_weekend/is_holiday slicing)") — but the comment framed it as a *date-attribute* design choice. It didn't surface the bigger consequence that **mart measures would fail to respond to ANY non-calendar dim filter** (item, store, state, category).
+
+**Fix that was applied (session 5.2 reset, captured in POWERBI_PLAYBOOK.md).** All measures relocated from `MART_EXECUTIVE_OVERVIEW` to a new dedicated hidden `_Measures` table, with each measure rewritten to aggregate `FACT_DAILY_SALES` directly. The fact has many-to-one relationships to all 3 dims, so fact-based measures respond correctly to every slicer on every page. The mart stays loaded but is hidden from the PBI field list — kept as documentation of the lean-marts pattern in dbt without coupling the BI model to it.
+
+**Discipline rule banked**: when a pre-aggregated table is joined to PBI alongside a fact, the table's relationship topology determines what dims its measures can be sliced by. If the pre-agg only relates to the calendar dim, its measures only work on calendar-only pages. For cross-dim slicing, measures MUST aggregate the fact. The mart is for the home page's compression story (1,081 rows powering an exec view instead of 32.9M); it's not the universal measure source.
+
+**Carry-forward principle for Project #3**: any pre-aggregated table in a BI semantic model needs documented filtering boundaries — *"this agg can be sliced by [X, Y, Z]; for slicing by [A, B], use the underlying fact."* Goes in the model's YAML alongside the column descriptions, not just in the dbt comment.
+
+### 2026-05-18 — Dedicated hidden `_Measures` table for measure organization
+
+Locked in during Phase 5 session 5.2 reset, backed by SQLBI / Microsoft Learn. Pattern: create a single empty table called `_Measures` (leading underscore sorts it to the top of the field list), hide the placeholder column, and home all measures there. Measures don't need a data source — they're computed expressions; the "home table" is purely organizational.
+
+**Why this beats homing measures on data tables.** (a) The field list separates *"things to drag onto visuals as dimensions"* (data tables) from *"things to drag onto visuals as values"* (measure table) — cleaner mental model. (b) Refactoring a measure to reference a different fact column is trivial when the measure has no data-table home — no "this measure is on `MART` but references `FACT`, is that wrong?" ambiguity. (c) Sorts alphabetically before all data tables thanks to the leading underscore — measures always at the top.
+
+**How to create**: Modeling tab → New table → paste `_Measures = ROW("Placeholder", BLANK())`. Then in Fields pane right-click the placeholder column → Hide. Then for every new measure: right-click `_Measures` in Fields pane → New measure. PBI auto-homes the measure on `_Measures`.
+
+**Carry-forward**: every new PBI project in any subsequent Project #N starts with `_Measures` created BEFORE the first measure is written. Don't accumulate measures on data tables and refactor later — costly.
+
+### 2026-05-18 — Dual storage mode on dims joined to a DirectQuery fact
+
+Decision locked during Phase 5 session 5.2 reset after audit + SQLBI / Marco Russo research. The setup is: `FACT_DAILY_SALES` in DirectQuery (forced by 32.9M-row size hitting GitHub's 100 MB push limit in pure-Import mode), all three dims previously in pure Import.
+
+**The problem with Import dims + DQ fact.** Per SQLBI: a relationship between an Import dim and a DirectQuery fact is a **limited (weak) relationship**. Properties of limited relationships:
+
+1. **Cannot use `RELATED`** to fetch a column across them.
+2. **Skip table expansion** — internal optimizations that propagate filter context through chained relationships don't apply.
+3. **INNER JOIN semantics** — drops rows from EITHER side that have no match, even when the other side semantically should be included.
+4. **High-cardinality join keys are slow** — limited-relationship joins are evaluated row-by-row above ~100-200 unique values.
+
+**Dual mode fixes all four.** Setting dims to Dual lets PBI's engine treat the dim as Import for in-memory queries AND as DirectQuery when joining to the live DQ fact at the Snowflake side. Relationships become **regular** at query time. Free in Desktop, zero downside, strictly better for this topology.
+
+**How to set**: Model view → right-click table header → Properties → Storage mode → Dual. PBI prompts that the change is irreversible (Dual → Import or DQ requires recreating the table) → confirm. Three dims × 1 click each.
+
+**Carry-forward**: any time a star schema spans storage modes (Import + DirectQuery), the Import dims should be Dual, not pure Import. Pure Import dims joined to DQ facts is an anti-pattern.
+
+### 2026-05-18 — Backfill anti-pattern: full-chain vs `--task-regex`
+
+Lesson from mid-session 5.2 — Claude initially proposed running the full Airflow extract → verify → dbt models → verify_dbt chain 68 times for a historical date backfill. That's the *canonical DAG* but the wrong tool for *historical hole-filling*. Sequential full-chain × 68 dates × 5:31 per run = ~6 hours unattended. Parallel with `--max-active-runs 4` halves it but still ~1.5h.
+
+**The 25-min alternative**: `airflow dags backfill ... --task-regex extract_one_day -i`. Restricts the backfill to only the named task per DagRun; downstream tasks (verify, dbt, verify_dbt) are skipped. Each run is then ~20-30s (just the Azure SQL → Snowflake extract, no dbt rebuild, no test suite). 68 × 25s = ~25 min. Then one `dbt build --full-refresh` at the end (~18s + tests) rebuilds the whole warehouse from the fuller RAW in one shot.
+
+**Why the wasted work**: full-chain × 68 means the dbt incremental MERGE fires 68 times, each time processing one date and re-running 78 tests. The tests are checking nothing that hasn't been checked, and the MERGEs are doing what one full-refresh would do in 22s. ~5.5 hours of pure waste.
+
+**Add `--reset-dagruns`** if any DagRun records already exist for the target logical_date range (e.g. from a half-completed earlier attempt) — wipes them clean before the new backfill creates fresh ones. No double-ups.
+
+**Discipline rule banked**: when proposing a multi-run Airflow operation, lead with the shortest professional approach. Surface the duration estimate explicitly *before* any command runs. If duration > 30 min, offer 2-3 explicit options (sequential / parallel / task-restricted) with their respective time costs before committing. Default = the fastest one that doesn't compromise data integrity.
+
+### 2026-05-18 — Research-backed playbook as a mid-phase reset tool
+
+Meta-lesson from Phase 5 session 5.2 mid-session reset. When a project's PBI build hit a measure-architecture bug 2 hours into the session, the right move was NOT to keep iterating step-by-step in chat. It was to STOP, spawn parallel research agents (one auditing the project's current state from docs + dbt files, one web-researching Microsoft Learn / SQLBI / RADACAD / Chris Webb for the architectural questions), synthesize into a single durable doc (`POWERBI_PLAYBOOK.md`), and update the live state docs (PROJECT_CONTEXT.md, TEACHING_PREFERENCES.md, this file).
+
+**Why this is durable** beyond Phase 5: the playbook locks the architectural decisions (storage modes, measure home, mart fate, measure family source) with web-verified sources, so subsequent sessions can be **executed** rather than **re-litigated**. If a later step proposes something that contradicts the playbook, that's a flag to push back rather than proceed.
+
+**Trigger condition for the pattern**: any time the project hits a "this design choice has cascading consequences across multiple future sessions, and we just discovered the consequence is wrong" moment. Don't power through. Reset, research, document, then resume.
+
+**Carry-forward for Project #3**: at the start of any BI / dashboard / semantic-model phase, draft the equivalent playbook *before* building. The session-5.1 mistake was building Executive Overview before locking the measure architecture — the bug surfaced only when page 2 introduced cross-dim slicing requirements that page 1 didn't have.
+
+### 2026-05-18 — Airflow extract anomaly + ground-truth-via-direct-execution diagnostic
+
+Hit at session 5.2 mid-session during the 68-date backfill verification. Symptom: Airflow's `airflow dags backfill m5_daily_extract --start-date 2014-01-07 --end-date 2014-03-15 --task-regex extract_one_day -i --reset-dagruns` reported **67 of 67 succeeded** — but parity check showed only **66 new dates landed** in Snowflake RAW. One date (`ds=2014-01-06` = `d_1074`) was silently skipped despite the Airflow task instance state showing `success`.
+
+**Diagnostic process — three steps, ground-truth-first**:
+
+1. **Confirm Azure SQL has the row.** Wrote `scripts/check_azure_sql_calendar_gap.py` re-using the production extract module's `connect_azure_sql()` helper (so .env semantics = guaranteed-same as the DAG's runtime). Queried `raw.calendar` for date='2014-01-06' AND d='d_1074' AND for the d_1072..d_1076 window. Result: **row exists**, all 5 surrounding d_values present, `raw.calendar` total = 1,969 rows (full M5 dataset).
+2. **Run the extract script directly.** From PowerShell with the project's `.venv` active: `python scripts/extract_azure_to_snowflake.py --run-date 2014-01-06`. Result: **clean load in 2 minutes** — 1 calendar row + 26,049 sell_prices rows (whole `wm_yr_wk=11350` week) + 30,490 sales_train rows, parity verifications all PASS.
+3. **Conclusion**: Azure SQL is fine, the script is fine, the bug is somewhere in Airflow's context resolution under `--reset-dagruns` + `--task-regex` mode. Root cause not definitively proven — suspected interaction between Cosmos-integrated DAG parsing and the backfill's `ds` resolution when DagRun records are being recreated. Documented as known anomaly.
+
+**The durable pattern banked: ground-truth-via-direct-execution**. When orchestration says SUCCESS but the data layer says otherwise, **invoke the underlying script directly with the same arguments the orchestrator would have passed**, in an environment that mirrors the orchestrator's (same Python, same .env, same connection helpers). Two outcomes possible: (a) script also fails the same way → bug is in the script; (b) script succeeds → bug is in the orchestrator's context, environment, or invocation path. Either outcome is actionable. The diagnostic burns only the script's runtime (~2 min here) versus debugging Airflow's task isolation, which can chew hours.
+
+**Why re-using the production module's connection helpers matters**: writing a fresh `pyodbc.connect()` in the diagnostic script would have introduced a confound — "does the diagnostic script see Azure SQL the same way Airflow's task does?" By importing `extract_azure_to_snowflake` and calling its `connect_azure_sql()` + `wake_azure_sql()`, the diagnostic uses the exact same connection path Airflow uses, so a clean answer from the diagnostic is decisive about the script-or-script-internals layer.
+
+**Discipline rule for future anomalies**: when "orchestrator says success but downstream check says missing data", reach for ground-truth-via-direct-execution before debugging the orchestrator. The orchestrator has more moving parts; the script is the simpler unit to isolate.
+
+**Carry-forward for Project #3**: when wiring any orchestrator (Airflow, Prefect, Dagster, Argo) around an existing ETL script, keep the script independently runnable with the same `--run-date`-style CLI surface the orchestrator uses. This isn't just "good code hygiene" — it's the diagnostic surface for problems exactly like this one.
+
 ### 2026-05-18 — `.pbix` file size forced composite-mode decision at git-push time
 
 Caught at session 5.1 close. Initial decision was **full Import** for all 5 tables in the semantic model — dims (small), mart (small), and the **32.9M-row `FACT_DAILY_SALES`** (large but reasoned: "VertiPaq compresses 5–10× and Import unlocks the full DAX surface"). The .pbix saved fine locally, but **`git push` was rejected by GitHub with**:
