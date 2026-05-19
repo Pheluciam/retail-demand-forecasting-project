@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: forecast_outputs
+    database: RETAIL_DB
+    schema: INTERMEDIATE
+    description: "Tables created by Snowflake Cortex ML scripts outside of dbt's control. dbt consumes these as sources to maintain proper lineage."
+
+    tables:
+      - name: forecast_raw_output
+        description: "Raw output of the Cortex ML FORECAST call in sql/snowflake/05_train_forecast_model.sql. CREATE OR REPLACE on each run. Consumed by fact_forecast_daily. ~85K rows (3,049 series × 28 days, minus any Cortex skipped)."
+        columns:
+          - name: series
+            description: "Series identifier — equals item_id at this grain."
+          - name: ts
+            description: "Forecast timestamp (date-only in practice)."
+          - name: forecast
+            description: "Predicted units for the (item, date) pair."
+          - name: lower_bound
+            description: "95% CI lower bound for the prediction."
+          - name: upper_bound
+            description: "95% CI upper bound for the prediction."

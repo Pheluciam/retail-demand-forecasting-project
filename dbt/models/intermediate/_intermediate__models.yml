@@ -13,7 +13,6 @@ models:
               - sale_date
 
     columns:
-
       - name: id
         description: "M5 series id, e.g. 'HOBBIES_1_001_CA_1_evaluation'."
         data_tests:
@@ -54,3 +53,22 @@ models:
 
       - name: revenue_amount_usd
         description: "units_sold * sell_price, in USD. NULL when sell_price is NULL ('unknown', not 'zero')."
+
+  - name: int_forecast_input
+    description: "Slim historical view feeding Snowflake Cortex ML FORECAST. Grain: one row per (item × day) — units summed across all stores. ~3.4M rows. series_id = item_id; Cortex trains one model per item (~3,049 series). Item-level grain chosen over item × store for stronger per-series signal and predictable training time (3-5 min on XS warehouse)."
+
+    columns:
+      - name: series_id
+        description: "Cortex SERIES_COLNAME. Concatenation of item_id and store_id with double-underscore delimiter."
+        data_tests:
+          - not_null
+
+      - name: sale_date
+        description: "Cortex TIMESTAMP_COLNAME."
+        data_tests:
+          - not_null
+
+      - name: units_sold
+        description: "Cortex TARGET_COLNAME. Units sold for that (item × store × day)."
+        data_tests:
+          - not_null

@@ -177,3 +177,81 @@ models:
 
       - name: revenue_amount_usd
         description: "units_sold * sell_price. Nullable when sell_price is NULL."
+
+  - name: fact_forecast_daily
+    description: "Daily forecast fact at item × day grain. Sourced from Snowflake Cortex ML FORECAST output. Item-level forecast (units summed across stores per item per day) over a 28-day horizon. ~85K rows. Conforms keys to the warehouse star — item_key matches dim_item; date_key surrogate of forecast_date (future dates not in dim_calendar, so relationships test on date_key is intentionally skipped)."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - item_id
+              - forecast_date
+
+    columns:
+
+      - name: forecast_key
+        description: "Surrogate row key. MD5 hash of (item_id, forecast_date)."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: item_key
+        description: "FK to dim_item.item_key. MD5 hash of item_id."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+
+      - name: date_key
+        description: "Surrogate of forecast_date. NOT tested against dim_calendar because forecast dates are future (extend dim_calendar to enable PBI date slicing)."
+        data_tests:
+          - not_null
+
+      - name: item_id
+        description: "Natural item key. Carried through for traceability."
+        data_tests:
+          - not_null
+
+      - name: forecast_date
+        description: "Future date being forecasted. 28-day horizon from MAX(sale_date) in the training data."
+        data_tests:
+          - not_null
+
+      - name: forecast_units
+        description: "Predicted units sold for that (item, forecast_date). Floored at 0."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: forecast_revenue_usd
+        description: "forecast_units × avg_recent_price for that item. Floored at 0. Recent price = average sell_price over the last 28 days of actuals; NULL-priced items contribute zero."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: forecast_units_lower_95
+        description: "95% CI lower bound for forecast_units. Floored at 0."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: forecast_units_upper_95
+        description: "95% CI upper bound for forecast_units. Floored at 0."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true

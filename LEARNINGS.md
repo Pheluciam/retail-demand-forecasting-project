@@ -212,6 +212,25 @@ Discovered during Phase 5 session 1 while connecting Power BI Desktop. PBI's Nav
 
 **Diagnostic technique worth banking**: `INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER('<user>')` filtered to the last N minutes is the canonical way to verify what role any connecting tool is actually using — beats guessing-from-symptoms decisively. Add this to the Project #3 troubleshooting toolkit early.
 
+### 2026-05-19 — ML training workload sizing: sample, validate, then scale
+
+Discovered during Phase 5 session 5.3 while training the Snowflake Cortex ML FORECAST model. Claude scoped training at the full fact grain — 30,490 (item × store) series × ~1,150 days = ~35M training rows — and pointed it at the XS warehouse (1 credit/hr, single-node). Training ran for 90+ minutes (and possibly longer; Phil chose to let it finish rather than cancel mid-run after waiting ~80 min).
+
+**The mistake**: scoping the ML workload to "production grain" before validating it ran in a tolerable time at all. Cortex multi-series scales reasonably well, but 30K series on XS is squarely on the high end of what XS handles efficiently. The single Cortex training run consumed roughly half a credit (acceptable cost) but a disproportionate share of Phil's wall-clock patience (not acceptable).
+
+**Forward principle — ML workload scoping checklist**:
+
+1. **Sample first.** Train on a small representative subset (e.g., 100-500 series, recent N months only) and measure wall-clock. Multiply out conservatively to the full grain — if the projection exceeds 30 min, decide before starting whether that's tolerable or scope needs reducing.
+2. **Match warehouse / cluster size to workload.** For Cortex multi-series at 10K+ series, MEDIUM warehouse trains materially faster than XS for marginal extra cost (warehouse cost scales linearly but training time scales sub-linearly). Same principle applies on Databricks (autoscaling cluster vs single-node).
+3. **Pick the right grain for the use case, not "the same grain as the fact."** If the Forecast vs Actual page surfaces category-level trends, item × day or category × day is sufficient and trains in minutes. Item × store × day is operationally useful but only if inventory/replenishment is the actual use case.
+4. **Communicate runtime expectations BEFORE starting.** Anything > 5 min should come with a flagged time estimate so the user can decide to schedule it, walk away, or scope down.
+
+**Carry-forward to Project #3**: Databricks ML workloads (MLflow / Spark MLlib / AutoML) have the same shape. Sample first, size cluster to projected runtime, communicate expectation, scale up only when correctness is proven at small scale. Community Edition Databricks is single-node and slow — paid trial or per-workload cluster sizing matters more there than on Snowflake's auto-suspend warehouse model.
+
+**Discipline rule logged in TEACHING_PREFERENCES separately**: any operation Claude proposes that's expected to exceed 5 minutes must be flagged with explicit time estimate up front; any operation that ends up >2x the estimate is a triggered post-mortem.
+
+**Resolution.** After cancelling the item × store training at 2h20min (still running, status confirmed RUNNING via Query History), pivoted to item-level grain (3K series). New training completed in the expected 3-5 min window. Lesson durably captured: the **right grain for a forecast is the grain that matches the use case AND trains in a tolerable window**, not "the same grain as the fact table." Item × store would only have earned its keep if the dashboard surfaced per-store forecasts as a primary visual. The Forecast vs Actual page surfaces aggregate revenue/units trends — item-level is the right grain. Interview talk track: *"I chose item-level forecasting over item × store because aggregated series have stronger signal — each item's daily demand across all stores is more stationary than per-store splits. Standard retail forecasting pattern when stores share similar SKU mixes."*
+
 ### Airflow
 
 **Stack architecture choices (2026-05-14, Phase 3 session 1)**

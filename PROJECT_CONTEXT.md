@@ -2,19 +2,70 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-18 (Phase 5 session 5.2 closed — 68-date RAW gap closed via Airflow extract-only backfill + manual extract for the one-date Airflow anomaly + `dbt build --full-refresh` rebuilding STAGING→INTERMEDIATE→WAREHOUSE→MARTS in 34s with PASS=78. Fact now spans 2011-01-29 → 2014-03-22 continuously; Executive Overview KPIs grew from $93.80M / 34.52M units to $100.70M / 36.98M units (+$6.9M / +2.46M from the 68 newly-loaded dates). MID-SESSION ARCHITECTURE RESET: 4 measures from session 5.1 were homed on `MART_EXECUTIVE_OVERVIEW` which has no relationship to `DIM_ITEM` / `DIM_STORE` — slicing by `cat_id` showed the same grand total for every category (design-cascade bug, not a typo). Deep research + project audit produced `POWERBI_PLAYBOOK.md` at repo root: locked decisions on storage modes (Dual on dims), measure home (dedicated hidden `_Measures` table), measure family (single fact-based source of truth), mart fate (hidden but kept). All 4 architectural decisions web-verified against Microsoft Learn / SQLBI / Chris Webb / RADACAD sources cited at end of playbook. Session 5.3 opens with: PBI architecture reset (8-step checklist in playbook §6) → Demand by Hierarchy page → Promotion & Price page.).
+> Last updated: 2026-05-19 (Phase 5 session 5.3 closed — **major architecture pivot**. Dropped the 2026-05-18 DirectQuery + Dual + lean-mart plan after deep-research audit found Import → Dual is a documented one-way restriction in PBI Desktop AND that the lean-marts pattern was under-engineered for the role-shape Phil targets. Pivoted to **all-Import + user-defined aggregations + Snowflake Cortex ML forecast layer**. dbt rebuild complete: renamed `mart_executive_overview` → `agg_sales_daily` (with `date_key` FK), added `agg_sales_daily_item_cat` (day × cat_id), `int_forecast_input` (Cortex training input at item-level grain), `fact_forecast_daily` (28-day forecast fact conforming to warehouse star), `mart_forecast_vs_actual` (UNION of actuals + forecast). `POWERBI_PLAYBOOK.md` rewritten end-to-end. `LEARNING_ROADMAP.md` locked: Project #3 stack (`financial-markets-pipeline-project` — Databricks lakehouse + Data Vault 2.0 + MS SQL Server source); Post-Project #3 training journey design (6-8 wk, Claude Code tooling, 80/20 code-to-concept split, quiz warm-up). **Cortex training deferred to overnight**: two failed in-session attempts (30K series cancelled at 2h20min; item-level 'fast' cancelled at 10 min). Script reconfigured for `method='best' + evaluate=TRUE` for portfolio-grade quality (expected 60-120 min on XS). Phil kicks off late 2026-05-19 to run unattended overnight.).
 
 ---
 
-> **🎯 SESSION 5.3 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
+> **🎯 SESSION 5.4 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
 >
-> Phase 5 session 5.2 closed with the RAW data gap fully filled and end-to-end verified, but the **Power BI architecture reset** (8 steps in `POWERBI_PLAYBOOK.md` §6) was deferred to session 5.3. **Read `POWERBI_PLAYBOOK.md` end-to-end before touching the `.pbix`.** Session 5.3 first actions:
+> Session 5.3 closed mid-Phase-A. **Cortex ML training was kicked off overnight** (started late 2026-05-19, expected 60-120 min on XS warehouse with `method='best' + evaluate=TRUE`). Session 5.4 first actions:
 >
-> 1. Open `POWERBI_PLAYBOOK.md` and read §1 (locked decisions), §2 (measure inventory + DAX formulas), §6 (reset checklist).
-> 2. Execute the 8-step reset (dims → Dual, create `_Measures`, rebuild 4 base measures on FACT, re-wire Executive Overview visuals, delete old mart-based measures, hide `MART_EXECUTIVE_OVERVIEW`, verify Executive Overview still renders correctly).
-> 3. **Only after reset passes:** build Demand by Hierarchy page (playbook §3.5.2.B) and Promotion & Price page (§3.5.2.C).
+> 1. **Verify the overnight Cortex training completed.** Snowsight → Monitoring → Query History → look for the `CREATE OR REPLACE SNOWFLAKE.ML.FORECAST` row with Status = Success. Run the smoke test at the bottom of `sql/snowflake/05_train_forecast_model.sql` — expect ~85K rows, ~3K series, dates 2014-03-23 → 2014-04-19.
+> 2. **If successful:** `dbt build --select fact_forecast_daily mart_forecast_vs_actual` from the dbt folder. All tests should pass.
+> 3. **Then Phase B:** write `sql/verify/10_phase5_forecast_layer_verification.sql` (5-section PASS/FAIL on forecast input, raw output, fact, mart). Same pattern as the existing `04_`–`09_` verify files.
+> 4. **Then Phase C:** Power BI semantic model rebuild per `POWERBI_PLAYBOOK.md` §6 Phase C checklist.
 >
-> The playbook is the locked single source of truth. If a step Claude proposes contradicts the playbook, push back and ask for justification before proceeding.
+> **If overnight training failed**: read the error from the Query History detail panel. Three recovery options ranked: (a) restart same config (Cortex training sometimes has transient failures); (b) drop scope to category × state (9 series, 1-3 min predictable); (c) larger warehouse — `ALTER WAREHOUSE WH_RETAIL SET WAREHOUSE_SIZE = 'LARGE'`, run training (~3-5 min), drop back to XS.
+>
+> `POWERBI_PLAYBOOK.md` (revised 2026-05-19) is the locked single source of truth for everything PBI-side. Read top-to-bottom at session open.
+
+---
+
+## Session 5.3 closeout (2026-05-19)
+
+**Headline outcomes:**
+
+- **Architecture pivoted** from the 2026-05-18 plan (DirectQuery fact + Dual dims + hidden lean mart) to all-Import + user-defined aggregations + Cortex forecast layer. Triggered by: (1) Import → Dual is a documented one-way restriction in PBI Desktop (verified against Snowflake/Microsoft docs), making the original `§6 reset checklist` step 2 mechanically impossible without re-importing as DirectQuery first; (2) deep-research audit concluded the lean-marts pattern was under-engineered, and the professional pattern is topic-scoped aggregations registered as user-defined aggregations.
+- **dbt layer rebuilt** end-to-end for the new architecture. 5 new/renamed models built green: `agg_sales_daily` (PASS=4), `agg_sales_daily_item_cat` (PASS=14), `int_forecast_input` (PASS=4 after rebuild at item-level grain). `fact_forecast_daily` + `mart_forecast_vs_actual` ready to build once Cortex overnight training lands.
+- **Cortex ML training script** ready. Two failed in-session attempts captured as learnings: item × store at 30K series (cancelled at 2h20min — over-scoped for XS warehouse); item-level with `method='fast'` (cancelled at 10 min when timing missed estimate). Script now configured for portfolio-grade `method='best' + evaluate=TRUE` — Snowflake docs recommend 'best' for <10K series. Expected 60-120 min on XS, run unattended overnight.
+- **POWERBI_PLAYBOOK.md fully rewritten** for the new architecture: locked decisions on storage modes (all Import), measure layer (`_Measures`), measure family (FACT-sourced with UDA routing), aggregate tables (two registered as UDAs), forecast layer (Cortex ML item-level grain). Full DAX inventory updated. §6 rebuild checklist replaces the old reset checklist.
+- **LEARNING_ROADMAP.md locked** two big items: Project #3 stack (`financial-markets-pipeline-project` — Databricks lakehouse + Data Vault 2.0 in Silver + Gold information marts, MS SQL Server operational source, with 5 open Phase 0 decisions); Post-Project #3 training journey design (6-8 weeks, Claude Code tooling not Cowork, 80/20 code-to-concept split, quiz warm-up format progressing multi-choice → fill-in-blank → type-the-command, hands-on with Phil's own project code).
+- **One headline LEARNINGS entry** captured today: ML training workload sizing — sample first, validate at small scale, scale up only when correctness is proven at small scale. Augmented with resolution after both failed Cortex attempts. Carry-forward to Project #3 Databricks workloads.
+
+**Files added this session (Phase 5 session 5.3):**
+
+- `dbt/models/marts/agg_sales_daily.sql` — renamed + restructured from `mart_executive_overview`; now has `date_key` FK to `dim_calendar`. ~1.1K rows.
+- `dbt/models/marts/agg_sales_daily_item_cat.sql` — new day × cat_id aggregate (~3.4K rows). Compound PK (date_key, cat_id).
+- `dbt/models/intermediate/int_forecast_input.sql` — slim historical view feeding Cortex ML at item-level grain. Aggregates units across stores per (item, day).
+- `dbt/models/intermediate/_intermediate__sources.yml` — registers `FORECAST_RAW_OUTPUT` as a dbt source for clean lineage.
+- `dbt/models/warehouse/fact_forecast_daily.sql` — 28-day forecast fact. Conforms keys to the warehouse star. Floors negatives at 0. Joins to recent prices for forecast revenue.
+- `dbt/models/marts/mart_forecast_vs_actual.sql` — UNIONs actuals from `fact_daily_sales` with forecast from `fact_forecast_daily`. Discriminator column `series_type`. Powers the PBI Forecast vs Actual page.
+- `sql/snowflake/05_train_forecast_model.sql` — Snowsight script. Trains Cortex ML model and lands forecast output into `RETAIL_DB.INTERMEDIATE.FORECAST_RAW_OUTPUT`. Configured for portfolio-grade `method='best' + evaluate=TRUE`.
+
+**Files updated this session:**
+
+- `dbt/models/marts/_marts__models.yml` — added schema/tests for both new mart files.
+- `dbt/models/intermediate/_intermediate__models.yml` — added `int_forecast_input` entry, updated description after item-level grain switch.
+- `dbt/models/warehouse/_warehouse__models.yml` — added `fact_forecast_daily` entry with full test suite (compound unique on (item_id, forecast_date), FK relationships, accepted_range on measures).
+- `POWERBI_PLAYBOOK.md` — rewritten end-to-end. 8 sections with new §6 rebuild checklist.
+- `LEARNINGS.md` — added the ML training workload sizing entry under Snowflake; augmented with resolution paragraph.
+- `LEARNING_ROADMAP.md` — Project #3 locked-stack section + Training Journey full-design section + Notes/changes entries (3 new).
+- `PROJECT_CONTEXT.md` — this file. Header date bumped, 5.3 closeout block added, session 5.4 opening directive added.
+
+**Files deleted this session:**
+
+- `dbt/models/marts/mart_executive_overview.sql` — replaced by `agg_sales_daily.sql` (rename + structural change).
+- `dbt/models/intermediate/int_forecast_input_item.sql` — temporary fallback file; absorbed into `int_forecast_input.sql` once item-level grain was locked.
+- `sql/snowflake/05a_train_forecast_model_item_level.sql` — temporary fallback script; absorbed into `05_train_forecast_model.sql`.
+
+**Pending / deferred to session 5.4:**
+
+- Cortex overnight training completion + smoke-test verification
+- `dbt build --select fact_forecast_daily mart_forecast_vs_actual` (depends on Cortex output existing)
+- Phase B: Snowflake verification SQL (`sql/verify/10_phase5_forecast_layer_verification.sql`)
+- Phase C: Power BI semantic model rebuild
+- Phase D: Page builds (all 5)
+- Phase E: Polish + commit
 
 ---
 

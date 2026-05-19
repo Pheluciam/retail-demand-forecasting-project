@@ -1,19 +1,22 @@
 version: 2
 
 models:
-  - name: mart_executive_overview
-    description: "Pre-aggregated daily summary for the Power BI dashboard home page. Grain: one row per sale_date. Roll-up of fact_daily_sales — ~32.9M fact rows collapse to ~1,148 mart rows. Lean-mart pattern: NO denormalised date attributes (Power BI joins dim_calendar for year/quarter/is_weekend/is_holiday slicing). 'Active' counts exclude on-shelf-didn't-sell rows. See DBT_PIPELINE.md → 'mart_executive_overview' for the full walkthrough."
+  - name: agg_sales_daily
+    description: "Day-grain aggregate fact over fact_daily_sales. Wired as a user-defined aggregation in Power BI to serve trend/summary visuals without scanning the 32.9M-row fact. ~1,148 rows. PK: date_key (FK to dim_calendar)."
 
     columns:
-
-      - name: sale_date
-        description: "Date of the daily summary. PK at this grain."
+      - name: date_key
+        description: "FK to dim_calendar.date_key. PK at this grain."
         data_tests:
           - unique
           - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_calendar')
+                field: date_key
 
       - name: total_units_sold
-        description: "SUM(units_sold) across all item × store rows for the date. Cannot be NULL — units_sold is not_null at the fact level."
+        description: "SUM(units_sold) for the date."
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -22,7 +25,7 @@ models:
                 inclusive: true
 
       - name: total_revenue_usd
-        description: "SUM(revenue_amount_usd) across all priced rows for the date. SUM ignores NULL-price rows (~34.66% of the fact) — they contribute zero, which is the right 'unknown revenue, not zero revenue' semantic. not_null is enforced at the aggregate level: a NULL daily total would mean an entire day's pricing is missing upstream and should fire loudly."
+        description: "SUM(revenue_amount_usd) for the date. NULL-price rows contribute zero."
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -31,7 +34,7 @@ models:
                 inclusive: true
 
       - name: active_item_count
-        description: "COUNT(DISTINCT item_id) where units_sold > 0. Items that actually sold something that day. Excludes on-shelf-didn't-sell rows."
+        description: "COUNT(DISTINCT item_id) where units_sold > 0 for the date."
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -41,7 +44,7 @@ models:
                 inclusive: true
 
       - name: active_store_count
-        description: "COUNT(DISTINCT store_id) where units_sold > 0. Stores that recorded at least one sale that day. M5 has 10 stores total (4 CA + 3 TX + 3 WI)."
+        description: "COUNT(DISTINCT store_id) where units_sold > 0 for the date. M5 has 10 stores total."
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -49,3 +52,131 @@ models:
                 min_value: 0
                 max_value: 10
                 inclusive: true
+
+  - name: agg_sales_daily_item_cat
+    description: "Day × item-category aggregate fact. Wired as user-defined aggregation in Power BI for cat_id-grouped visuals. ~3 cats × ~1,148 days = ~3.4K rows. PK: (date_key, cat_id)."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date_key
+              - cat_id
+
+    columns:
+      - name: date_key
+        description: "FK to dim_calendar.date_key. Part of compound PK."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_calendar')
+                field: date_key
+
+      - name: cat_id
+        description: "Item category. Part of compound PK. M5 has 3 categories: FOODS, HOUSEHOLD, HOBBIES."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["FOODS", "HOUSEHOLD", "HOBBIES"]
+
+      - name: total_units_sold
+        description: "SUM(units_sold) for the (date, cat) pair."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: total_revenue_usd
+        description: "SUM(revenue_amount_usd) for the (date, cat) pair."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: active_item_count
+        description: "COUNT(DISTINCT item_id) where units_sold > 0 for the (date, cat) pair."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 3049
+                inclusive: true
+
+      - name: active_store_count
+        description: "COUNT(DISTINCT store_id) where units_sold > 0 for the (date, cat) pair."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 10
+                inclusive: true
+
+  - name: mart_forecast_vs_actual
+    description: "Powers the Power BI Forecast vs Actual page. UNIONs actuals from fact_daily_sales (aggregated to item × day to match the forecast grain) with fact_forecast_daily. Discriminator column 'series_type' = 'actual' or 'forecast'. Grain: one row per (item × observation_date × series_type)."
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - item_id
+              - observation_date
+              - series_type
+
+    columns:
+      - name: date_key
+        description: "Surrogate of observation_date. For actuals, joins to dim_calendar. For forecasts, points at future dates not in dim_calendar (see fact_forecast_daily note)."
+        data_tests:
+          - not_null
+
+      - name: item_key
+        description: "FK to dim_item.item_key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+
+      - name: observation_date
+        description: "Date the row pertains to — sale_date for actuals, forecast_date for forecasts."
+        data_tests:
+          - not_null
+
+      - name: item_id
+        description: "Natural item key."
+        data_tests:
+          - not_null
+
+      - name: units
+        description: "Units sold (actuals) or predicted (forecasts)."
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+
+      - name: revenue_usd
+        description: "Revenue in USD — units × price (actuals) or forecast_units × avg_recent_price (forecasts). Can be NULL for actuals where sell_price was NULL."
+
+      - name: units_lower_95
+        description: "95% CI lower bound for units. NULL on actual rows."
+
+      - name: units_upper_95
+        description: "95% CI upper bound for units. NULL on actual rows."
+
+      - name: series_type
+        description: "'actual' (historical observation) or 'forecast' (Cortex prediction)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['actual', 'forecast']
