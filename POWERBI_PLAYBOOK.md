@@ -26,7 +26,9 @@
 
 **No DirectQuery. No Dual. No composite mode.** The Storage-mode lock that blocked the 2026-05-18 plan is bypassed entirely by never loading anything as non-Import in the first place. Re-importing as Import via the Snowflake connector at PBI build time gives a clean slate.
 
-**Fact column pruning at PBI Import time.** In Power Query before loading, drop `sale_key` (32-char MD5 hash — biggest compression killer in VertiPaq), `date_key` (redundant once `sale_date` is on the table), and optionally `sell_price` if `.pbix` size is borderline. Keep: `item_id`, `store_id`, `sale_date`, `units_sold`, `revenue_amount_usd`, `item_key`, `store_key`.
+**Fact column pruning at PBI Import time — UPDATED 2026-05-20 (Phase 5.4).** In Power Query before loading, drop `sale_key` ONLY (32-char MD5 hash with 32.9M unique values — the actual compression killer in VertiPaq). **Keep `date_key`** — VertiPaq dictionary-encodes it efficiently (only ~1,180 distinct values, ~50MB total footprint) and it's needed for clean relationships and downstream UDA wiring (kept for option-preservation even though §1.4 ruled UDA out for this build). Optionally drop `sell_price` only if `.pbix` size is borderline. Keep: `item_id`, `store_id`, `sale_date`, `date_key`, `units_sold`, `revenue_amount_usd`, `item_key`, `store_key`.
+
+**Why `date_key` is NOT a compression killer (corrected from original §1.1).** The original playbook claimed `date_key` should be dropped because it was "redundant once `sale_date` is on the table." That reasoning conflated row count with distinct-value count. VertiPaq's dictionary encoding cost scales with distinct values, not row count. `sale_key` has 32.9M distinct values (one per fact row) so dictionary + 32.9M pointers = the actual size hit. `date_key` has ~1,180 distinct values (one per date) so dictionary + 32.9M short-int pointers = negligible. Keep it.
 
 ### 1.2 Measure layer — dedicated hidden `_Measures` table
 
@@ -44,14 +46,20 @@ All measures aggregate `FACT_DAILY_SALES`. The two `AGG_*` tables are wired in P
 
 Senior-DE talk track: *"I built a Kimball star in `warehouse` and two pre-aggregated rollups in `marts`, wired as managed aggregations. Power BI transparently routes summary queries to the rollups and falls through to the fact for detail queries."*
 
-### 1.4 Aggregate tables — registered as user-defined aggregations
+### 1.4 Aggregate tables — UDA path ABANDONED 2026-05-20 (kept in dbt+Snowflake as portfolio narrative only)
 
-Two aggregate tables, both in `RETAIL_DB.MARTS`:
+**UPDATED 2026-05-20 (Phase 5.4).** Manage Aggregations is architecturally incompatible with the all-Import storage-mode decision locked in §1.1. Microsoft Learn (`aggregations-advanced`) requires that **the Detail Table for any user-defined aggregation be in DirectQuery storage mode**, not Import. Our entire model is Import, so UDA cannot be wired. The two architectural choices are mutually exclusive — you can have all-Import simplicity OR user-defined aggregations, not both.
 
-- `AGG_SALES_DAILY` — day-grain rollup (~1.1K rows). Columns: `date_key`, `total_units_sold`, `total_revenue_usd`, `active_item_count`, `active_store_count`. FK to `DIM_CALENDAR` via `date_key`.
-- `AGG_SALES_DAILY_ITEM_CAT` — day × cat_id rollup (~3.4K rows). Columns: `date_key`, `cat_id`, plus the four measures. FK to `DIM_CALENDAR` via `date_key`; group-by mapping to `DIM_ITEM[cat_id]`.
+**What this means in practice.** The two aggregate tables still exist:
 
-In PBI: **Modeling → Manage aggregations** → for each agg, map every column to the corresponding column on `FACT_DAILY_SALES` or the linked dim. Set Precedence: 50 on `AGG_SALES_DAILY` (the more granular), 30 on `AGG_SALES_DAILY_ITEM_CAT` (less granular). PBI auto-selects the most-granular match for each query.
+- `AGG_SALES_DAILY` — day-grain rollup (~1.1K rows) in `RETAIL_DB.MARTS`.
+- `AGG_SALES_DAILY_ITEM_CAT` — day × cat_id rollup (~3.4K rows) in `RETAIL_DB.MARTS`.
+
+They live in dbt + Snowflake as portfolio-narrative artefacts ("I built two pre-aggregated marts following the Kimball aggregate pattern"). They are **NOT loaded into the PBI semantic model**. All PBI measures hit `FACT_DAILY_SALES` directly. Empirically: VertiPaq Import compresses the 32.9M-row fact to ~60-80MB and Sum-based measures return sub-second, so the performance loss from not having UDA is negligible at our scale.
+
+**Interview talk track**: *"I went all-Import for the semantic model because the alternative — DirectQuery on the fact + Dual on the dims — has a documented one-way restriction in PBI Desktop. The trade-off was losing access to user-defined aggregations, which require a DirectQuery detail table. I kept the pre-aggregated marts in dbt for the architectural story but didn't wire them into PBI — VertiPaq compression on the Import-mode fact made the perf gap negligible at our scale."*
+
+**For Phase C build**: do NOT include the agg tables in the PBI Get Data table selection. Pick 6 tables: 3 dims + FACT_DAILY_SALES + FACT_FORECAST_DAILY + MART_FORECAST_VS_ACTUAL. (Original §6 Phase C checklist listed 8 — that's superseded by this 2026-05-20 patch.)
 
 ### 1.5 Forecast layer — Snowflake Cortex ML, item-level grain
 

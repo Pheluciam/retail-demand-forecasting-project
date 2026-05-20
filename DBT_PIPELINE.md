@@ -1354,6 +1354,20 @@ first explicit application.
 
 ## `mart_executive_overview` walkthrough
 
+> **Historical note (added 2026-05-20).** This section reflects the model
+> as originally built in Phase 4 session 5. In Phase 5 session 5.3 the
+> model was renamed to `agg_sales_daily` with structural changes (added a
+> surrogate `date_key` FK to `dim_calendar`; dropped the natural-key
+> `sale_date` column) to support being a Power BI user-defined aggregation
+> candidate. A second aggregate `agg_sales_daily_item_cat` (day × cat_id
+> rollup) was added at the same time. In Phase 5 session 5.4 the UDA plan
+> was found architecturally incompatible with all-Import models (UDA
+> requires DirectQuery on the Detail Table per Microsoft Learn); both agg
+> tables remain in dbt + Snowflake as portfolio narrative artefacts but
+> are NOT wired into Power BI. The walkthrough below is preserved as a
+> teaching artefact showing the original lean-marts pattern; current PBI
+> state is documented in `POWERBI_PLAYBOOK.md` and `PROJECT_CONTEXT.md`.
+
 First (and currently only) model in the marts layer. Grain: one row per
 `sale_date`. Source: `WAREHOUSE.fact_daily_sales`. Output: 1,079 rows
 materialised as a table in `RETAIL_DB.MARTS.MART_EXECUTIVE_OVERVIEW`.
@@ -1820,7 +1834,13 @@ single SELECT (one warehouse round-trip):
 | WAREHOUSE    | `dim_item` full-table row count                      | `> 0`  |
 | WAREHOUSE    | `dim_store` full-table row count                     | `> 0`  |
 | WAREHOUSE    | `fact_daily_sales` rows for `run_date`               | `> 0`  |
-| MARTS        | `mart_executive_overview` rows for `run_date`        | `== 1` |
+
+> The MARTS-layer row check on `mart_executive_overview` was removed in
+> Phase 5 session 5.4 when the table was renamed to `agg_sales_daily` with
+> a structural change (sale_date → date_key surrogate). The fact-layer
+> check above already validates that dbt's incremental MERGE landed the
+> day's data; downstream agg/mart layer derives from fact, so a separate
+> per-run mart check is redundant.
 
 Any failure aggregates into a single `RuntimeError` message that names
 every failing layer + observed vs expected counts — actionable diagnosis

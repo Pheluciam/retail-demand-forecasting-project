@@ -19,9 +19,11 @@ models:
           - not_null
 
       - name: d
-        description: "M5 day identifier ('d_NNNN'). Carried through for traceability to raw."
+        description: "M5 day identifier ('d_NNNN'). Carried through for traceability to raw. NULL on future-horizon rows added to support forecast date slicing."
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "calendar_date <= DATE '2014-03-23'"
 
       - name: is_weekend
         description: "TRUE on Saturday and Sunday (via DAYNAME, convention-independent)."
@@ -29,29 +31,37 @@ models:
           - not_null
 
       - name: is_holiday
-        description: "TRUE when event_name_1 OR event_name_2 is non-null."
+        description: "TRUE when event_name_1 OR event_name_2 is non-null. FALSE on future-horizon rows."
         data_tests:
           - not_null
 
       - name: wm_yr_wk
-        description: "Walmart fiscal year+week. Passthrough from M5."
+        description: "Walmart fiscal year+week. Passthrough from M5. NULL on future-horizon rows."
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "calendar_date <= DATE '2014-03-23'"
 
       - name: snap_ca
-        description: "SNAP (food stamp) redemption window open in California. 0 or 1."
+        description: "SNAP (food stamp) redemption window open in California. 0 or 1. NULL on future-horizon rows."
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "calendar_date <= DATE '2014-03-23'"
 
       - name: snap_tx
-        description: "SNAP redemption window open in Texas. 0 or 1."
+        description: "SNAP redemption window open in Texas. 0 or 1. NULL on future-horizon rows."
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "calendar_date <= DATE '2014-03-23'"
 
       - name: snap_wi
-        description: "SNAP redemption window open in Wisconsin. 0 or 1."
+        description: "SNAP redemption window open in Wisconsin. 0 or 1. NULL on future-horizon rows."
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "calendar_date <= DATE '2014-03-23'"
 
   - name: dim_item
     description: "Item dimension. One row per distinct M5 item (~3,049 rows). Surrogate item_key via dbt_utils.generate_surrogate_key on item_id. Hierarchy: cat_id → dept_id → item_id (denormalised here so Power BI can roll up either level without re-joining)."

@@ -390,6 +390,16 @@ Three Snowflake timestamp variants. NTZ = "No Time Zone" (wall clock only, no of
 
 Snowflake's web UI for running SQL, managing objects, and viewing query history. The "worksheet" tabs are where SQL actually executes — disk files are source-of-truth; Snowsight is where they're pasted and run.
 
+### **Snowflake Cortex ML Functions**
+
+In-warehouse machine learning primitives accessible via SQL — `SNOWFLAKE.ML.FORECAST`, `SNOWFLAKE.ML.ANOMALY_DETECTION`, `SNOWFLAKE.ML.CLASSIFICATION`. Trains directly on warehouse data without exporting to a separate ML platform. Runs server-side regardless of the client.
+
+**Key config knobs for `FORECAST`:** `method='fast'` (single-model, lightweight) vs `method='best'` (ensembles Prophet/ARIMA/ExpSmoothing/GBM and picks the best per series; ~4-5× heavier on RAM). `evaluate=TRUE` runs cross-validation to produce accuracy metrics; multiplies in-memory state. `on_error='skip'` drops series with insufficient history rather than failing the whole run.
+
+**Warehouse sizing for ML training is MEMORY-bounded, not just CPU-bounded.** `method='best' + evaluate=TRUE` on 3K series OOM'd at 1h40m on XS (16 GB RAM), completed in ~15 min on XL — the ensemble + CV holds per-series state simultaneously across all models and folds. Pick warehouse for RAM headroom on training, not cost-per-minute.
+
+**In this project:** `retail_demand_forecast_28d` model trained 2026-05-20 on item-level grain (3,049 series × ~1,150 days = 3.5M training rows) for a 28-day forecast horizon. Trained on XL, landed via `RESULT_SCAN(LAST_QUERY_ID())` into `RETAIL_DB.INTERMEDIATE.FORECAST_RAW_OUTPUT`. [Project 2]
+
 ---
 
 ## 5. dbt
@@ -1126,7 +1136,29 @@ A Power BI tool that copies formatting from one visual to another. The disciplin
 
 The Power BI data source for Snowflake — Microsoft-maintained, talks Snowflake's wire protocol directly. Preferred over generic ODBC.
 
-**In this project:** How Power BI will reach the marts layer in Phase 5.
+**In this project:** How Power BI reaches the warehouse + mart layer in Phase 5.
+
+### **`_Measures` table** (dedicated measure home)
+
+A hidden, empty (single-placeholder-column) table created via `_Measures = ROW("Placeholder", BLANK())`, whose only job is to be the home address for every DAX measure. Sorts to the top of the field list via the leading underscore. Hides the Placeholder column so the table appears as measures-only to anyone using the report.
+
+**Why it matters:** Without a dedicated measure home, every measure ends up homed on whichever data table you happened to click when you created it. That couples measures to data tables (delete the data table → measure home vanishes), makes measures hard to find (treasure hunt across multiple tables), and mixes measures visually with raw columns in the field list. Documented best-practice pattern by Microsoft Learn + SQLBI.
+
+**In this project:** All 20 DAX measures live on `_Measures` (Phase 5 session 5.4). [Project 2]
+
+### **User-defined aggregation** (UDA, "Manage aggregations")
+
+A Power BI feature that wires a pre-aggregated table (e.g. `agg_sales_daily`) to be transparently substituted for queries against the underlying detail fact, when the query's grain matches the agg. Configured via Modeling → Manage aggregations. Each agg column maps to a Sum / Count / Min / Max / GroupBy summarization over a column on the detail table.
+
+**Critical requirement:** the Detail Table must be in **DirectQuery storage mode**, not Import. The agg table itself can be Import. The two-storage-mode pair is what lets PBI's query planner choose between cache (agg) and source (DQ fact) per query.
+
+**In this project:** Architecturally ruled out at Phase 5 session 5.4 because the locked playbook decision (§1.1) is all-Import. The agg tables stay in dbt + Snowflake as a portfolio narrative artefact but are NOT wired into PBI. [Project 2]
+
+### **Mark as Date Table**
+
+A modelling-tab action that tells Power BI which table is your canonical date dimension, and which column on it is the actual DATE. Required for DAX time-intelligence functions (`SAMEPERIODLASTYEAR`, `TOTALYTD`, `DATESINPERIOD`, etc) to compute correctly. Without it, PBI may auto-create a hidden Date hierarchy that competes with your real dim_calendar and produces inconsistent YoY / YTD results.
+
+**In this project:** `DIM_CALENDAR` is marked as Date Table on `calendar_date` (Phase 5 session 5.4). Auto Date/Time is disabled globally (carry-forward from Project #1).
 
 ---
 

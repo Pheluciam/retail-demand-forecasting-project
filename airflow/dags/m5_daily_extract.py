@@ -261,13 +261,19 @@ def m5_daily_extract():
         philosophy as verify_one_day, but for the dbt pipeline rather than the
         extract.
 
-        Nine checks batched into a single SELECT for one warehouse round-trip:
+        Eight checks batched into a single SELECT for one warehouse round-trip:
             STAGING:      stg_m5_calendar (==1), stg_m5_sell_prices (>0),
                           stg_m5_sales_train (>0)
             INTERMEDIATE: int_sales_with_prices (>0)
             WAREHOUSE:    dim_calendar (>0), dim_item (>0), dim_store (>0),
                           fact_daily_sales (>0 for run_date)
-            MARTS:        mart_executive_overview (==1 for run_date)
+
+        Mart-layer check removed 2026-05-20 (Phase 5.4) — the legacy
+        `MART_EXECUTIVE_OVERVIEW` was renamed to `AGG_SALES_DAILY` (with a
+        surrogate `date_key`, not `sale_date`) in Phase 5.3. The fact check
+        above already validates that dbt's incremental MERGE landed the day's
+        data; downstream mart/agg layer derives from fact, so a separate
+        per-run mart check is redundant.
 
         Any failure -> RuntimeError -> task failure -> red square in Grid view.
         """
@@ -277,8 +283,9 @@ def m5_daily_extract():
 
         import extract_azure_to_snowflake as extractor
 
-        # Six positional %s binds for the six date-filtered checks; the three
-        # dim full-table counts don't take a parameter.
+        # Five positional %s binds for the five date-filtered checks; the
+        # three dim full-table counts don't take a parameter. Mart-layer
+        # check removed 2026-05-20 — see docstring above.
         sql = (
             "SELECT "
             "    (SELECT COUNT(*) FROM STAGING.STG_M5_CALENDAR "
@@ -294,9 +301,7 @@ def m5_daily_extract():
             "    (SELECT COUNT(*) FROM WAREHOUSE.DIM_ITEM) AS dim_item_rows, "
             "    (SELECT COUNT(*) FROM WAREHOUSE.DIM_STORE) AS dim_store_rows, "
             "    (SELECT COUNT(*) FROM WAREHOUSE.FACT_DAILY_SALES "
-            "        WHERE sale_date = %s) AS fact_rows, "
-            "    (SELECT COUNT(*) FROM MARTS.MART_EXECUTIVE_OVERVIEW "
-            "        WHERE sale_date = %s) AS mart_rows"
+            "        WHERE sale_date = %s) AS fact_rows"
         )
 
         conn = extractor.connect_snowflake()
@@ -304,7 +309,7 @@ def m5_daily_extract():
             cur = conn.cursor()
             try:
                 cur.execute(sql, (run_date, run_date, run_date, run_date,
-                                  run_date, run_date))
+                                  run_date))
                 row = cur.fetchone()
                 if row is None:
                     raise RuntimeError(
@@ -312,7 +317,7 @@ def m5_daily_extract():
                         f"for run_date={run_date}"
                     )
                 (stg_cal, stg_sp, stg_sales, int_rows,
-                 dim_cal, dim_item, dim_store, fact_rows, mart_rows) = row
+                 dim_cal, dim_item, dim_store, fact_rows) = row
             finally:
                 cur.close()
         finally:
@@ -331,8 +336,6 @@ def m5_daily_extract():
         log.info("  WAREHOUSE.DIM_STORE rows: %d (expected > 0)", dim_store)
         log.info("  WAREHOUSE.FACT_DAILY_SALES rows for %s: %d (expected > 0)",
                  run_date, fact_rows)
-        log.info("  MARTS.MART_EXECUTIVE_OVERVIEW rows for %s: %d (expected 1)",
-                 run_date, mart_rows)
 
         failures = []
         if stg_cal != 1:
@@ -360,10 +363,6 @@ def m5_daily_extract():
         if fact_rows <= 0:
             failures.append(
                 f"WAREHOUSE.FACT_DAILY_SALES: expected > 0 rows for {run_date}, got {fact_rows}"
-            )
-        if mart_rows != 1:
-            failures.append(
-                f"MARTS.MART_EXECUTIVE_OVERVIEW: expected 1 row for {run_date}, got {mart_rows}"
             )
 
         if failures:

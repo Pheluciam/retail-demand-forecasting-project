@@ -3,6 +3,12 @@
 -- Materialised as table (per dbt_project.yml warehouse default).
 -- Surrogate key via dbt_utils.generate_surrogate_key for consistency with other dims.
 -- ISO date variants (DAYOFWEEKISO, WEEKISO) used for session-parameter independence.
+--
+-- Coverage: historical M5 dates from stg_m5_calendar PLUS a 60-day future
+-- horizon to support forecast date slicing in Power BI (Forecast vs Actual
+-- page joins forecast.date_key → dim_calendar.date_key). Future rows carry
+-- date-derived attributes only; M5-specific attrs (d, wm_yr_wk, event_*,
+-- snap_*) are NULL — see _warehouse__models.yml tests scoped historical-only.
 -- See DBT_PIPELINE.md for the full walkthrough.
 
 WITH source AS (
@@ -18,6 +24,27 @@ WITH source AS (
         snap_tx,
         snap_wi
     FROM {{ ref('stg_m5_calendar') }}
+),
+
+future_dates AS (
+    SELECT
+        DATEADD(day, seq4() + 1, (SELECT MAX(calendar_date) FROM source))::DATE AS calendar_date,
+        NULL::VARCHAR AS d,
+        NULL::NUMBER  AS wm_yr_wk,
+        NULL::VARCHAR AS event_name_1,
+        NULL::VARCHAR AS event_type_1,
+        NULL::VARCHAR AS event_name_2,
+        NULL::VARCHAR AS event_type_2,
+        NULL::NUMBER  AS snap_ca,
+        NULL::NUMBER  AS snap_tx,
+        NULL::NUMBER  AS snap_wi
+    FROM TABLE(GENERATOR(ROWCOUNT => 60))
+),
+
+combined AS (
+    SELECT * FROM source
+    UNION ALL
+    SELECT * FROM future_dates
 ),
 
 enriched AS (
@@ -56,7 +83,7 @@ enriched AS (
         snap_ca,
         snap_tx,
         snap_wi
-    FROM source
+    FROM combined
 ),
 
 final AS (

@@ -231,6 +231,29 @@ Discovered during Phase 5 session 5.3 while training the Snowflake Cortex ML FOR
 
 **Resolution.** After cancelling the item × store training at 2h20min (still running, status confirmed RUNNING via Query History), pivoted to item-level grain (3K series). New training completed in the expected 3-5 min window. Lesson durably captured: the **right grain for a forecast is the grain that matches the use case AND trains in a tolerable window**, not "the same grain as the fact table." Item × store would only have earned its keep if the dashboard surfaced per-store forecasts as a primary visual. The Forecast vs Actual page surfaces aggregate revenue/units trends — item-level is the right grain. Interview talk track: *"I chose item-level forecasting over item × store because aggregated series have stronger signal — each item's daily demand across all stores is more stationary than per-store splits. Standard retail forecasting pattern when stores share similar SKU mixes."*
 
+### 2026-05-20 — Cortex ML training is MEMORY-bounded, not just runtime-bounded, when using `method='best' + evaluate=TRUE`
+
+Direct follow-up to the entry above. After fixing the GRAIN problem (item-level not item × store), the next training run at the right grain was kicked off overnight on XS warehouse with `method='best' + evaluate=TRUE` for portfolio-grade quality. Expected runtime per Snowflake docs was 60-120 min. Actual outcome: at 1h40m, the run failed with `STATEMENT_ERROR: Function available memory exhausted` (Snowflake's `_BASECONSTRUCT` UDF OOM'd inside the Python sandbox running the Cortex training).
+
+**The mistake — second one in two days on the same workload.** Even at the right grain (3K series, ~3.5M training rows), `method='best' + evaluate=TRUE` is materially heavier on RAM than `method='fast'` because:
+
+- `best` ensembles 4-5 models (Prophet, ARIMA, ExpSmoothing, GBM) in parallel — each model's per-series state is held in memory simultaneously across the cross-validation folds.
+- `evaluate=TRUE` runs cross-validation splits which multiplies the in-memory model state by the number of folds.
+- The XS warehouse on Snowflake is single-node with ~16 GB RAM available to UDFs. The combined ensemble + CV state on 3K series exceeded that ceiling at ~1h40m into the training.
+
+**The recovery path that worked.** Bumped warehouse to XL (`ALTER WAREHOUSE WH_RETAIL SET WAREHOUSE_SIZE = 'XLARGE'`), re-ran the same SQL, completed in ~15 min. Cost ~1-2 credits total (XL is 16 credits/hr but only ran ~15 min). Then immediately bumped warehouse back to XS via `SET WAREHOUSE_SIZE = 'XSMALL'` as the last statement in the script so it didn't sit idle at XL between training runs.
+
+**The forward principle.** Warehouse sizing decisions for ML workloads must weight RAM headroom separately from CPU time. The standard guidance "smaller warehouse runs longer for less cost" works for SQL transformations (CPU-bounded) but breaks for ML training (memory-bounded). Specifically for Cortex:
+
+- `method='fast'` on XS: ~3 min on 3K series, fits in RAM, ~0.05 credits.
+- `method='best' + evaluate=FALSE` on XS: probably 30-60 min, may fit in RAM. Untested in this session.
+- `method='best' + evaluate=TRUE` on XS: OOM at 1h40m on 3K series. Memory ceiling exceeded.
+- `method='best' + evaluate=TRUE` on XL: ~15 min on 3K series. Memory headroom + horizontal compute. ~1-2 credits.
+
+**Interview talk track**: *"For portfolio-quality forecasting I went with method='best' + evaluate=TRUE which ensembles 4 models and runs cross-validation. The XS warehouse hit a memory ceiling at 1h40m — the ensemble holds per-series state for all 4 models plus CV folds simultaneously, which exceeded the single-node RAM. Bumped to XL warehouse, ran in 15 min for ~1-2 credits, then immediately dropped back to XS. The lesson: ML workload sizing is memory-bounded not just time-bounded, so picking the warehouse on cost-per-minute alone is the wrong heuristic."*
+
+**Carry-forward**: applies identically to Databricks ML clusters in Project #3 — single-node clusters with tight RAM ceilings work for small-feature workloads but blow up on ensemble + CV training. Size cluster for memory headroom on training workloads, then scale down for inference/query workloads.
+
 ### Airflow
 
 **Stack architecture choices (2026-05-14, Phase 3 session 1)**
@@ -1160,6 +1183,36 @@ VertiPaq genuinely compressed the row data — 32.9M rows × multiple columns in
 1. **Estimate output artefact size BEFORE the empirical evaluation**, not after. Back-of-envelope: 32.9M rows × ~10 columns × ~30 bytes/value (uncompressed) = ~10 GB raw → VertiPaq 5–10× compression → ~1–2 GB in .pbix → exceeds GitHub by 10×. Would have caught this without the failed push.
 2. **GitHub's 100 MB per-file limit is the hard constraint** for any git-versioned binary deliverable — `.pbix`, `.twbx` (Tableau workbook), `.parquet` snapshots, ML model artefacts. Plan around it from session 1, not session N when the push fails.
 3. **Composite mode is the senior-DE default for any analytics tool consuming both small and large warehouse surfaces.** Small + slow-changing → Import (fast slice/dice, full DAX). Large + slow-changing → DirectQuery (no client storage, latency on click). Large + fast-changing → DirectQuery (freshness). Mixed → composite. Make this an explicit per-table decision, not a project-wide one.
+
+### 2026-05-20 — Manage Aggregations requires DirectQuery on the Detail Table — architecturally incompatible with all-Import models
+
+Discovered mid-rebuild in Phase 5 session 5.4. The `POWERBI_PLAYBOOK.md` §1.4 prescribed wiring `AGG_SALES_DAILY` and `AGG_SALES_DAILY_ITEM_CAT` as user-defined aggregations to accelerate Sum-based measures over the 32.9M-row fact. When I opened Modeling → Manage Aggregations and tried to map `DATE_KEY` (GroupBy summarization) to a Detail Table, every option in the dropdown was unclickable. Spent ~30 min on what looked like a UI bug (clicks not registering, options visually greyed) before web-checking the actual Microsoft Learn doc on aggregations-advanced.
+
+**The actual rule, missed by the original playbook:** the Detail Table for any user-defined aggregation must be in **DirectQuery storage mode**, not Import. From Microsoft Learn: *"The Detail Table must use DirectQuery storage mode, not Import."* The aggregation table itself can be Import (and usually should be, for VertiPaq compression), but the table it maps INTO has to be DirectQuery so PBI can rewrite queries between Import-cached-agg and DQ-direct-fact at runtime.
+
+**Why this matters for an all-Import model.** The playbook §1.1 explicitly locked the model to all-Import (no Dual, no DirectQuery, no composite) to avoid the Import → Dual one-way restriction trap and the lean-marts measure cascade bug from session 5.2. That decision was correct for those problems, but it forecloses the UDA path entirely. The two architectural choices are mutually exclusive: you can have all-Import simplicity OR user-defined aggregations, not both.
+
+**Resolution.** Deleted `AGG_SALES_DAILY` and `AGG_SALES_DAILY_ITEM_CAT` from the PBI semantic model. They're still in Snowflake + dbt as a portfolio narrative artefact — *"I built two pre-aggregated marts following the Kimball aggregate pattern"* — but they don't get wired into PBI. Net result: measures hit `FACT_DAILY_SALES` directly via VertiPaq Import. Empirically: sub-second for Sum-based measures on 32.9M rows, so no measurable performance loss to deliver.
+
+**Forward principle**: any time a playbook locks in a storage-mode decision (Import only / DirectQuery only / Dual / composite), explicitly enumerate which downstream optimizations that decision rules OUT. UDA is one. RLS row-level filtering on DQ-only tables is another. Hybrid tables for fast-changing data is a third. The storage-mode decision isn't just a perf choice — it cascades through every advanced PBI feature.
+
+**Interview talk track**: *"I went all-Import for the semantic model because the alternative — DirectQuery on the fact + Dual on the dims — has a documented one-way restriction in PBI Desktop where you can't downgrade Import to Dual without re-importing as DirectQuery first. The cost of that decision was losing access to user-defined aggregations, which require a DirectQuery detail table. I kept the pre-aggregated marts in dbt for the architectural story but didn't wire them into PBI — VertiPaq compression on the Import-mode fact made the perf gap negligible at our scale."*
+
+**Carry-forward to Project #3 (Databricks)**: Power BI on Databricks has the same UDA requirement — agg tables in Import, detail in DirectQuery. Decide storage mode BEFORE building the agg layer so you don't ship dead aggs to PBI like this project did.
+
+### 2026-05-20 — Power BI measure formula editor: Enter does NOT commit when editing an existing measure; click the green checkmark
+
+Discovered after burning ~30 min in Phase 5 session 5.4 trying to fix the `Active Items` measure. Symptom: card on canvas kept showing `--` (BLANK) regardless of which formula was typed into the measure formula bar. Iterated through 4 different DAX formulations — original (used `MAX(DIM_CALENDAR[calendar_date])`), then fact-side (`MAX(FACT_DAILY_SALES[sale_date])`), then `CALCULATE(DISTINCTCOUNT, units_sold > 0)`, then dead-simple `DISTINCTCOUNT(FACT_DAILY_SALES[item_key])`. ALL returned BLANK. Other measures on the same fact worked fine (Total Revenue, Total Units Sold, Active Stores all rendered correctly).
+
+**The actual bug.** I was instructing Phil to press Enter to commit each new formula. In PBI Desktop's measure formula editor, **Enter does NOT commit when you're editing an EXISTING measure** — it inserts a newline (DAX supports multi-line formulas). The displayed text in the formula bar updates with each new formulation, but the SAVED measure definition stays at the original. Every "new" formula was just sitting unsaved in the editor while the broken original kept executing in the background, returning BLANK.
+
+**Why other measures were fine.** When you click "New measure" from the Modeling ribbon, the workflow is different — Enter DOES commit-and-exit the new-measure dialog. All 20 measures during the bulk-paste phase were created via that workflow, so Enter worked. The trap is specifically when you go back to EDIT an existing measure by clicking it in the Data pane — different formula bar mode, different commit semantics.
+
+**The fix.** Click the green checkmark icon to the LEFT of the formula bar text explicitly. The X (red) and checkmark (green when there are unsaved changes, grey when committed) are next to the formula. Clicking the green checkmark commits the edit. Pressing Enter just adds a line break.
+
+**Forward principle, locked into PROJECT_CONTEXT 5.5 opening directive**: whenever Claude prescribes a measure edit (not a new-measure create), the instruction must include "click the green checkmark to commit, not Enter."
+
+**Diagnostic technique worth banking**: when a DAX measure returns BLANK and there's no obvious filter context reason, the FIRST check should be "is the formula actually saved?" Not "is the DAX correct?" The committed formula vs displayed formula divergence is invisible until you click away and click back — then the formula bar shows the saved version, not the typed-but-unsaved version. Carry-forward for Tableau too (Tableau has analogous edit-mode-vs-saved-mode confusion in calculated fields).
 
 ### Docker
 

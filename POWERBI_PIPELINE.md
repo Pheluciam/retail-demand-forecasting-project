@@ -1,12 +1,23 @@
 # POWERBI_PIPELINE.md — Power BI Dashboard Walkthrough
 
 > Companion to `EXTRACT_PIPELINE.md` and `DBT_PIPELINE.md`. This doc explains
-> the Power BI layer that consumes the dbt-built `WAREHOUSE` star schema and
-> `MARTS` pre-aggregations to surface a five-page analyst-facing dashboard.
+> the Power BI layer that consumes the dbt-built `WAREHOUSE` star schema to
+> surface a five-page analyst-facing dashboard.
 >
-> Last updated: 2026-05-18 (Phase 5 session 1 — initial scaffold; Snowflake
-> connection + semantic model + Home page coverage to be expanded as the
-> session ships).
+> Last updated: 2026-05-20 (Phase 5 session 5.4 close).
+>
+> **Architectural note — read first.** This doc was initially scaffolded in
+> Phase 5 session 5.1 against a `lean-marts + DirectQuery on the fact` model
+> that is no longer current. The architecture was rewritten in session 5.3
+> (deep-research audit) to **all-Import + user-defined aggregations + a
+> Snowflake Cortex ML forecast layer**, and the UDA portion was further
+> refined in session 5.4 after Microsoft Learn confirmed UDA requires a
+> DirectQuery detail table (architecturally incompatible with all-Import).
+> The locked source of truth for the PBI build is `POWERBI_PLAYBOOK.md`,
+> revised 2026-05-19 and patched 2026-05-20 at close of session 5.4.
+> Sections below that reference `mart_executive_overview`, the lean-marts
+> pattern, or DirectQuery storage mode are historical context for sessions
+> 5.1-5.2 and are scheduled for rewrite in session 5.6 polish.
 
 ---
 
