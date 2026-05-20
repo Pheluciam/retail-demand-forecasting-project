@@ -2,27 +2,60 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-20 (Phase 5 session 5.4 closed — Cortex training landed after warehouse upsize to XL (XS hit OOM at 1h40m on `method='best' + evaluate=TRUE`); forecast layer verified 7× PASS via new `sql/verify/10_phase5_forecast_layer_verification.sql`; `dim_calendar` extended 60 days to cover the 28-day forecast horizon; Power BI Phase C semantic model rebuild complete — 8 tables imported (`sale_key` pruned in Power Query), 9 relationships, dedicated `_Measures` table with 20 DAX measures, Executive Overview page rebuilt with 4 working KPI cards + dual-line trend chart; Manage Aggregations discovered architecturally incompatible with all-Import models (requires DirectQuery on the Detail Table per Microsoft Learn) — agg tables removed from PBI but retained in dbt+Snowflake as portfolio-narrative artifacts).
+> Last updated: 2026-05-20 (Phase 5 session 5.5 closed — Pause Visuals discovered as silent root cause of an entire session's worth of "click → blank → refresh" misery after ~3 hours of misdirected diagnostics; spurious cyclic reference error on FACT_DAILY_SALES cleared by save+close+reopen of the .pbix; Executive Overview cards re-bound and line chart converted to dual-axis (revenue left, units right); Demand by Hierarchy page given title + 3 slicers (Date / State / Category) per playbook §3.2; Promotion & Price + Seasonality & Calendar + Forecast vs Actual pages added as title-only stubs; 3 new LEARNINGS banked (Pause Visuals as silent root cause, spurious cyclic ref + reopen workaround, new Card visual GA blank-render); 3 TEACHING_PREFERENCES discipline rules locked (Pause Visuals check FIRST, cyclic ref → reopen before trace, one root cause when three things break together)).
 
 ---
 
-> **🎯 SESSION 5.5 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
+> **🎯 SESSION 5.6 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
 >
-> Session 5.4 closed Phase C cleanly. Executive Overview page renders: $100.70M revenue, 36.98M units, 10 active stores, ~3K active items, dual-line trend chart with weekly seasonality + Christmas dips visible. All 20 measures live on `_Measures`. Session 5.5 builds **pages 2-5** per `POWERBI_PLAYBOOK.md` §3:
+> Session 5.5 burned most of its energy on a misdirected diagnostic chain (cat_id slicer empty → Manage Aggregations red herring → cyclic reference red herring → empty card visual red herring → finally: Optimize → Pause Visuals was on). Net visual output for 5.5: Executive Overview page now has 4 working KPI cards + dual-axis trend chart (one polish step from playbook §3.1); Demand by Hierarchy has title + 3 slicers; pages 3-5 exist as title-only stubs. Session 5.6 completes the visual builds per `POWERBI_PLAYBOOK.md` §3.2-§3.5:
 >
-> 1. **Demand by Hierarchy** (§3.2) — 3 slicers (Date/State/Category) + revenue-by-cat_id bar + revenue-by-dept_id bar + hierarchy matrix (cat → dept → item).
-> 2. **Promotion & Price** (§3.3) — same 3 slicers + Avg Selling Price by Category column + Revenue by SNAP Day donut (requires new calculated column `is_snap_day` on `DIM_CALENDAR`) + Revenue vs Avg Price scatter.
-> 3. **Seasonality & Calendar** (§3.4) — Weekend vs Weekday bar + Year × Month heatmap + Holiday event impact bar.
-> 4. **Forecast vs Actual** (§3.5) — Actual + Forecast revenue line on `observation_date` + 95% CI ribbon between `Forecast Lower 95` and `Forecast Upper 95` + cat × series_type matrix.
+> 1. **Demand by Hierarchy** (§3.2) — finish: revenue-by-cat_id bar + revenue-by-dept_id bar + hierarchy matrix (cat → dept → item). Slicers already in place.
+> 2. **Promotion & Price** (§3.3) — 3 slicers + Avg Selling Price by Category column + Revenue by SNAP Day donut (requires new calculated column `is_snap_day` on `DIM_CALENDAR`) + Revenue vs Avg Price scatter.
+> 3. **Seasonality & Calendar** (§3.4) — 3 slicers + Weekend vs Weekday bar + Year × Month heatmap + Holiday event impact bar.
+> 4. **Forecast vs Actual** (§3.5) — Date slicer extended through forecast horizon + Category slicer + Actual + Forecast revenue line on `observation_date` + 95% CI ribbon between `Forecast Lower 95` and `Forecast Upper 95` + cat × series_type matrix.
 >
-> **Hard discipline reminders locked at 5.4 close:**
+> **Hard discipline reminders locked at 5.5 close — read these FIRST before proposing any PBI step:**
 >
-> - **PBI measure formula commits require an explicit click on the green checkmark icon. Enter does NOT commit when editing an existing measure** — it inserts a newline. This burned ~30 min in 5.4 ("the formula text changed in the bar but the saved formula stayed at the old broken version → measure returned BLANK"). Always include "click the green checkmark" when prescribing measure edits.
-> - **Manage Aggregations is OFF the table** for this model. UDA requires DirectQuery on the Detail Table per Microsoft Learn; our model is all-Import. The `AGG_SALES_DAILY` + `AGG_SALES_DAILY_ITEM_CAT` tables stay in dbt+Snowflake only for portfolio narrative. Do not re-attempt UDA wiring. PBI performance on the 32.9M-row fact via Import is sub-second for the Sum-based measures anyway.
-> - **`POWERBI_PLAYBOOK.md` §1.1 has been patched** — drop `sale_key` ONLY from FACT_DAILY_SALES in Power Query. `date_key` MUST be kept (VertiPaq dictionary-encodes it at ~50MB for the whole 32.9M rows; only ~1,180 distinct values).
-> - **`dim_calendar` now extends 60 days past the last historical date** (max = 2014-05-22). Future-horizon rows carry date-derived attrs (year, quarter, month, is_weekend, etc) but NULL for M5-specific cols (`d`, `wm_yr_wk`, `snap_*`, `event_*`). Tests scoped to historical-only via `where: "calendar_date <= DATE '2014-03-23'"`. The DAX `Active Items` measure uses fact's `sale_date` (not dim_calendar's calendar_date) to avoid the future-horizon empty-date trap; locked definition is `CALCULATE(DISTINCTCOUNT(FACT_DAILY_SALES[item_key]), FACT_DAILY_SALES[units_sold] > 0)`.
+> - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC.** If user reports "things disappear when I click", "I keep having to refresh", "the visual is blank", "the slicer is empty even though data exists" — the very first thing to check is the Optimize tab → Pause Visuals icon. If the icon shows a Play arrow (▶), visuals are paused (click to resume). If it shows a Pause symbol (II), visuals are live. Counterintuitive UI: the icon shown is the action that would happen on click, not the current state. 1-click check, highest signal of any PBI diagnostic. Do NOT trace M-code, DAX, relationships, calculated columns, or measure dependencies until this is confirmed off.
+> - **Cyclic reference errors → save + close + reopen the .pbix FIRST.** Many PBI cyclic ref errors are spurious / cache desync, documented by crossjoin.co.uk. Only trace the model after a clean reopen fails to clear it. Burned ~30 min in 5.5 tracing a non-existent cycle.
+> - **PBI measure formula commits require an explicit click on the green checkmark icon. Enter does NOT commit when editing an existing measure** — it inserts a newline. Always include "click the green checkmark" when prescribing measure edits. (Carried from 5.4.)
+> - **Manage Aggregations is OFF the table** for this model. UDA requires DirectQuery on the Detail Table per Microsoft Learn; our model is all-Import. The `AGG_SALES_DAILY` + `AGG_SALES_DAILY_ITEM_CAT` tables stay in dbt+Snowflake only for portfolio narrative. (Carried from 5.4.)
+> - **`dim_calendar` extends 60 days past the last historical date** (max = 2014-05-22). DAX `Active Items` measure uses fact's `sale_date` not dim_calendar's `calendar_date` to avoid the future-horizon empty-date trap. (Carried from 5.4.)
+> - **When 3 things look broken at once, suspect ONE root cause.** In 5.5, empty slicers + blank cards + cyclic ref error all healed with one click (Pause Visuals off). Isolate one variable, try the cheapest single-variable fix first.
+> - **Pacing locked**: 1-2 steps per response, no walls of text, code blocks only for paste-able (DAX, file paths, command strings), plain text for everything Phil is meant to READ not COPY.
 >
-> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20 at close of 5.4) remains the locked single source of truth. Pages 5.5 build follows §3.2–§3.5 exactly.
+> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20 at close of 5.4) remains the locked single source of truth. Pages 5.6 build follows §3.2–§3.5 exactly.
+
+---
+
+## Session 5.5 closeout (2026-05-20)
+
+**Headline outcomes:**
+
+- **Pause Visuals identified as silent root cause of the entire session's pain.** At session open, the cat_id slicer on the freshly-cleared Demand by Hierarchy page rendered empty even though `DIM_ITEM` had 3,049 rows with `cat_id` populated (FOODS / HOBBIES / HOUSEHOLD). Repeatedly: clicking anything in PBI made visuals go blank; clicking Home → Refresh forced them to render; the next interaction blanked them again. Spent ~3 hours chasing red herrings (Manage Aggregations check, cyclic reference Power Query trace, DAX calculated column scan, query dependency graph, model relationship audit, save+close+reopen, multiple card recreate cycles). Finally clicked a card to format it and the right pane showed *"To format your visual, refresh it or resume visual queries"* — the word "resume" cracked it open. Optimize ribbon → Pause Visuals was toggled ON. One click off, everything resumed working. The empty slicers, blank cards, and "needs refresh" pattern were all downstream symptoms of paused queries. Locked as the #1 PBI diagnostic check going forward.
+- **Spurious cyclic reference on FACT_DAILY_SALES cleared by save+close+reopen.** Mid-session during a refresh, PBI surfaced *"5 queries are blocked: FACT_DAILY_SALES — A cyclic reference was encountered during evaluation."* Traced exhaustively: M-code clean (Source → 3 Navigation steps → drop SALE_KEY), Query Dependencies graph showed 6 queries pulling independently from one Snowflake source with no cross-references, no calculated columns on FACT_DAILY_SALES, all 20 measures present on `_Measures`. After ~30 min of tracing, web search surfaced the crossjoin.co.uk article noting these errors are sometimes spurious. Save → red-X close PBI Desktop → reopen the .pbix from File Explorer cleared the error. Demand by Hierarchy slicers immediately started returning values (the underlying Pause Visuals issue was still in play, but the cyclic-ref red herring was gone).
+- **Executive Overview page restored to working state.** During the cross-session re-anchoring before 5.5 opened, the 4 KPI cards on Executive Overview had lost their measure bindings (rendering as empty rectangles with funnel + ... icons). After Pause Visuals was disabled, rebuilt the 4 cards: dragged `Total Revenue` ($100.70M), `Total Units Sold` (36.98M), `Active Stores` (10), `Active Items` (3K) into fresh Card visuals. Also converted the dual-line chart from single-Y-axis to true dual-axis (revenue scale on left 0-150K, units scale on right 0-50K) by moving `Total Units Sold` from the Y-axis field well into the Secondary y-axis field well. Lines overlap visually because units drive revenue (expected), but each measure now has its own scale.
+- **Demand by Hierarchy page seeded with title + 3 slicers per playbook §3.2.** Title text box, Date slicer on `DIM_CALENDAR[calendar_date]` (Between mode, 2011-01-29 → 2014-05-22), State slicer on `DIM_STORE[state_id]` (CA / TX / WI), Category slicer on `DIM_ITEM[cat_id]` (FOODS / HOBBIES / HOUSEHOLD). Diagnostic CAT_ID table that was added during the empty-slicer debugging deleted. Bar charts + matrix deferred to 5.6.
+- **Pages 3-5 added as title-only stubs.** Promotion & Price, Seasonality & Calendar, Forecast vs Actual page tabs created with titles only. Visual builds deferred to 5.6.
+- **Three durable LEARNINGS captured.** (a) Power BI Optimize → Pause Visuals as silent root cause of "everything disappears on click" — locked discipline rule: check this FIRST, before any other PBI diagnostic. (b) Power BI cyclic reference errors can be spurious — close+reopen the .pbix before tracing the model. (c) Power BI new Card visual (Nov 2025 GA) renders blank when bound to a measure that works in other visuals — workaround is Reset to default in Format pane, or delete + recreate, or switch to Multi-row card (in 5.5's case, the apparent Card GA bug was actually a downstream symptom of Pause Visuals, but the carry-forward is real).
+
+**Files updated this session (Phase 5 session 5.5):**
+
+- `LEARNINGS.md` — 3 new entries appended to the Power BI section: Optimize → Pause Visuals as root cause, spurious cyclic reference + reopen workaround, new Card visual GA blank-render bug.
+- `TEACHING_PREFERENCES.md` — header date bumped; added 3 new discipline rules: (a) Pause Visuals check FIRST when symptoms suggest paused queries, (b) cyclic ref → save+close+reopen before tracing the model, (c) when 3 things look broken at once, suspect one root cause and try the cheapest single-variable fix first.
+- `PROJECT_CONTEXT.md` — this file. Header date bumped; 5.5 opening directive replaced with 5.6 opening directive carrying forward all 5.4 discipline rules plus the new Pause Visuals + cyclic-ref-reopen rules; 5.5 closeout block inserted above the 5.4 closeout.
+- `PROJECT_PLAN.md` — status block bumped (5.4 closed; 5.5 closed; 5.6 next).
+- `powerbi/retail_demand_forecasting.pbix` — saved. Executive Overview: 4 KPI cards + dual-axis trend chart now working. Demand by Hierarchy: title + 3 slicers. Pages 3-5: title-only stubs.
+
+**Pending / deferred to session 5.6:**
+
+- Demand by Hierarchy — finish: 2 bar charts (revenue by cat_id, revenue by dept_id) + hierarchy matrix (cat → dept → item with Total Revenue + Total Units Sold + Revenue Share %).
+- Promotion & Price — full build: 3 slicers + Avg Selling Price by Category column + Revenue by SNAP Day donut + Revenue vs Avg Price scatter. Requires new calculated column `is_snap_day` on `DIM_CALENDAR`.
+- Seasonality & Calendar — full build: 3 slicers + Weekend vs Weekday bar + Year × Month heatmap + Holiday event impact bar.
+- Forecast vs Actual — full build: Date slicer extended through forecast horizon + Category slicer + Actual + Forecast revenue line on `observation_date` + 95% CI ribbon + cat × series_type matrix.
+- Cross-page slicer sync (Date + State + Category), drill-through actions, theme polish — Phase 5.7 or rolled into 5.6 if energy allows.
+- Optional Exec Overview polish: line chart visual separation (e.g. Line and Clustered Column for clearer units / revenue distinction).
 
 ---
 

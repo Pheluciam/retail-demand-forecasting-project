@@ -1214,6 +1214,52 @@ Discovered after burning ~30 min in Phase 5 session 5.4 trying to fix the `Activ
 
 **Diagnostic technique worth banking**: when a DAX measure returns BLANK and there's no obvious filter context reason, the FIRST check should be "is the formula actually saved?" Not "is the DAX correct?" The committed formula vs displayed formula divergence is invisible until you click away and click back — then the formula bar shows the saved version, not the typed-but-unsaved version. Carry-forward for Tableau too (Tableau has analogous edit-mode-vs-saved-mode confusion in calculated fields).
 
+### 2026-05-20 — Power BI Optimize → Pause Visuals as silent root cause of "everything disappears on click"
+
+The biggest time-sink of Phase 5 session 5.5. Symptom from session open: every interaction in PBI Desktop (clicking a slicer, dragging a measure into a card, switching pages) caused visuals to go blank. Clicking Home → Refresh forced them to render. Next interaction → blank again. Pattern was so consistent Phil flagged it explicitly ("I click on something, everything disappears. I have to do a refresh.") roughly an hour into the session.
+
+**The actual cause.** Optimize ribbon → "Pause Visuals" was toggled ON. Pause Visuals is a PBI Desktop feature meant for performance work — when on, every visual query is queued but NOT executed until you Resume or Refresh. The visual stays in whatever render state it was in before the pause, then blanks when you change anything that invalidates it (new field, new filter, page switch), because the new query never runs. Refresh forces the queue to flush, visuals render. Next interaction → queued again → blank again.
+
+**Why it took so long to find.** Three reasons compounded:
+- The pattern looked like a model/data bug at first ("DIM_ITEM[cat_id] slicer is empty" — data view showed 3,049 rows with FOODS/HOBBIES/HOUSEHOLD populated, so it wasn't the data).
+- A refresh during diagnostics surfaced an unrelated "A cyclic reference was encountered" error pointing at FACT_DAILY_SALES, which became the red herring. Spent ~30 min tracing M-code (clean), query dependencies (clean), calculated columns (none), measures (intact). The cycle turned out to be spurious — close+reopen of the .pbix cleared it (see separate entry below).
+- The "To format your visual, refresh it or resume visual queries" message in the Format pane was the actual giveaway — it appeared late in the session when Phil clicked a card to format it. The word "resume" in that message is what unlocked it.
+
+**The fix.** Optimize ribbon → click Pause Visuals to toggle OFF. Icon behavior is the opposite of what you'd expect: when visuals are LIVE, the button shows a Pause symbol (II) meaning "click to pause." When PAUSED, it shows a Play arrow (▶) meaning "click to resume." Confusing UI affordance.
+
+**Discipline rule locked, added to TEACHING_PREFERENCES.** Whenever the user reports "things keep disappearing when I click" / "I need to refresh after every change" / "visuals look empty until I refresh" — FIRST diagnostic before anything else is Optimize → Pause Visuals. It's a 1-click check with the highest signal-to-noise of any PBI diagnostic. Cyclic ref errors, empty slicers, blank cards, "needs refresh to render" — all are downstream symptoms of paused queries.
+
+**How it likely got turned on.** Pause Visuals is a single-click button on the Optimize ribbon, easy to hit accidentally. Once on, it stays on through saves and reopens. No global toast or banner indicates the paused state — the only persistent cue is the icon style in the Optimize tab (which you only see if you're on that tab).
+
+**Carry-forward to any future PBI work**: the Optimize tab and its toggles (Pause visuals, Refresh visuals, Apply all slicers button) are part of PBI's standard diagnostic surface. Worth learning what each one does proactively so symptoms map quickly to causes. Carry-forward also to Tableau (Pause Auto Updates serves the same function, same trap potential).
+
+### 2026-05-20 — Power BI cyclic reference errors can be spurious; close + reopen the .pbix before deep-diving
+
+Mid-session in 5.5, a Refresh surfaced: *"5 queries are blocked by the following error: FACT_DAILY_SALES — A cyclic reference was encountered during evaluation."* The natural first reaction is to chase the cycle through the model — Power Query M-code, query dependency graph, calculated columns, calculated tables, measure dependencies, bidirectional relationships, etc.
+
+**What was actually wrong.** Nothing. The M-code for FACT_DAILY_SALES was clean (Source → 3 Navigation steps → drop SALE_KEY). Query Dependencies graph showed all 6 queries pulling independently from the one Snowflake source with no cross-references. No calculated columns on FACT_DAILY_SALES. The error was spurious.
+
+**The fix.** Save → close Power BI Desktop entirely (red X) → reopen the .pbix from File Explorer. The cyclic reference error did not return after the reopen. Slicers that had been silently failing started returning values normally (the underlying Pause Visuals issue was still there, but the cycle itself was gone).
+
+**The supporting evidence** (from a contemporaneous web search): the [crossjoin.co.uk article on this error](https://blog.crossjoin.co.uk/2023/01/22/understanding-the-a-cyclic-reference-was-encountered-during-evaluation-error-in-power-query-in-power-bi-or-excel/) explicitly notes: *"Sometimes the cyclic reference error is raised without an actual cyclic reference existing, another refresh doesn't raise the error, and it's better to refresh twice before investigating."* So this is a documented PBI quirk, not a one-off glitch.
+
+**Discipline rule.** When PBI surfaces *A cyclic reference was encountered during evaluation*, the first step is save + close + reopen, NOT trace the model. Only if the error persists after reopen should you investigate M-code → Query Dependencies → DAX calc columns / tables → measure deps → bidirectional relationship cycles. Going straight to the trace burned ~30 min in 5.5 before the reopen cleared everything.
+
+**Carry-forward.** Many PBI Desktop "intermittent or one-time-only" errors clear on reopen because PBI caches internal model snapshots that can desync from the live model state. When the symptom doesn't match the data (data is clean, formula is correct, relationships look right, error is still there) — reopen first.
+
+### 2026-05-20 — Power BI new Card visual (Nov 2025 GA) renders blank when bound to a measure that works in other visuals
+
+Symptom: created a fresh Card visual on Executive Overview page, dragged `Total Revenue` into the Value field well — visual rendered as an empty rectangle with no number. Same measure on the same page in a Line chart rendered correctly with `$100.70M` value visible in the legend tooltip.
+
+**Confirmed via web search**: the [(new) Card visual went GA with the Nov 2025 Power BI release](https://learn.microsoft.com/en-us/power-bi/visuals/power-bi-visualization-card) and has a documented blank-render bug in PBI Desktop. The [Fabric Community thread](https://community.fabric.microsoft.com/t5/Desktop/New-Card-Visual-Missing-After-Latest-Power-BI-Update/m-p/4861831) describes the same symptom and offers "restoring the defaults" via the Format pane as the documented fix.
+
+**The fixes that actually worked tonight (after disabling Pause Visuals):**
+- The card rendered immediately once Pause Visuals was turned off. The blank-card issue was a downstream consequence of paused queries, not the GA bug. So the "new Card visual GA bug" may not have been the root cause in this specific instance — but it IS a known PBI Desktop issue and worth banking.
+
+**What's actually banked.** If a measure renders blank in a fresh Card visual but works elsewhere on the same page, and Pause Visuals is confirmed OFF, the workarounds (in order of preference): (a) Format pane → Reset to default; (b) Delete the card and recreate; (c) Switch to the Multi-row card visual, which is a different visual type that doesn't share the new Card's render path.
+
+**Why this matters for portfolio narrative.** Tonight's confusion (blank card AND paused visuals AND spurious cyclic ref all happening at once) reinforces a senior-DE diagnostic principle: **isolate one variable at a time**. When three things look broken, fixing all three with one action (turn off Pause Visuals) tells you they were all symptoms, not three independent bugs. Locked into a teaching-preferences carry-forward.
+
 ### Docker
 
 _(to be populated as encountered — containerisation patterns, docker-compose,
