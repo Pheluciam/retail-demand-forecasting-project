@@ -1309,6 +1309,44 @@ Discovered during Phase 5 session 5.6 while building the Forecast vs Actual matr
 
 **Carry-forward to Project #3.** When Data Vault 2.0 hubs/satellites + Gold information marts both expose the same metric (revenue, units, customer count), the same pattern applies: explicit suffix on the mart-sourced measure (`Revenue (Gold)` alongside `Revenue (Vault)`), let the field list show them side by side.
 
+### 2026-05-21 — Power BI format pane section names vary by visual type (Bars / Columns / Markers / Slices)
+
+Surfaced during Phase 5 session 5.7 polish pass when I (Claude) repeatedly told Phil to click "Format → Visual → **Bars** → Colors" for the Average Selling Price chart on Promotion & Price. The dropdown didn't exist because the chart was a **clustered column** (vertical bars), not a horizontal bar chart — and in the new Power BI Desktop format pane the section is called **Columns** for column charts, **Bars** for bar charts, **Markers** for scatter / bubble charts, and **Slices** for pie / donut charts. Each parent section contains the visual's color controls, but the parent's name follows the visual type, not a uniform "Colors" parent.
+
+**The chain.** The "old" Power BI format pane had a flat-ish structure with "Data colors" as a near-universal subsection at the top level of the Visualizations format pane — same name across most visual types. The redesigned pane (rolled out 2023-2024 and now standard in 2026) groups formatting controls under visual-type-specific parent sections. Same control, different parent label. Made worse by the fact that conditional formatting (`fx` button) lives inside whichever parent section the colors are under — so the click path is different for each visual type.
+
+**Practical impact during 5.7.** I gave Phil three wrong paths in a row before he insisted I deep-think and web-check the actual UI. Confirmed via Microsoft Learn:
+
+- Bar chart (horizontal) → Format → Visual → **Bars** → Color → fx
+- Column chart (vertical) → Format → Visual → **Columns** → Color → fx
+- Scatter / bubble → Format → Visual → **Markers** → Apply settings to (per-series dropdown) → Color
+- Donut / pie → Format → Visual → **Slices** → Colors → fx
+- Line chart → Format → Visual → **Lines** → Colors
+
+**Carry-forward discipline.** When giving Power BI format-pane click paths in 5.8 and beyond, web-check the visual type's parent section name FIRST if I can't see the Format pane directly in the user's screenshot. Don't assume a generic "Colors" parent. If a path doesn't click, ask the user what parent sections are visible in their pane rather than guessing again. Cost ~10 minutes mid-session before Phil pushed back; cheap to avoid in future by visual-type-checking upfront.
+
+**Edge cases worth knowing:**
+
+- The **Apply settings to** dropdown inside Markers / Bars / Columns is what gates per-series customization. If a user can't find per-category color controls, it's usually because they haven't switched the dropdown off "All" yet.
+- Conditional formatting via `fx` is only enabled when "Apply settings to" = All. Per-series manual colors bypass the fx dialog entirely.
+- The Power BI documentation on Microsoft Learn for the new Card visual, scatter chart, donut chart, etc. each describe their parent section names directly — the docs are the source of truth, not stale community blog posts that still show the old "Data colors" path.
+
+### 2026-05-21 — Power BI new Card visual Reference labels field well is variant-dependent (basic-license PBI Desktop is missing it)
+
+Surfaced during Phase 5 session 5.7 polish pass when trying to add a YoY % indicator to the Total Revenue card on Executive Overview. Standard pattern for the new Card visual (Nov 2025 GA) is to drag the YoY measure into the **Reference labels** field well — gives a small secondary value below the main number, color-coded against the change. The screenshot of Phil's Build visual pane on the card showed only: **Value, Categories, Tooltips, Drill through**. No Reference labels field well.
+
+**The chain.** The new Card visual's Reference labels feature shipped as part of the November 2025 GA release, but the field well's exposure in the Build pane appears to be license-tier-gated or variant-specific. Phil is running stock-standard Power BI Desktop with no Pro / PPU / Premium license. Microsoft's documentation describes Reference labels as a core feature of the new Card visual; community threads from late 2025 / early 2026 show two distinct Build-pane variants — one with Reference labels exposed, one without — with no clear pattern as to which license tier or feature flag drives the difference. The Reference labels field well is sometimes present in identical-version PBI Desktop installs on different machines.
+
+**Practical impact during 5.7.** I'd planned 5 time-intelligence visuals on Exec Overview (YoY % pill, YTD line overlay, 30-day MA, etc.). The YoY % visualization was meant to use Reference labels on the Total Revenue card. With the field well unavailable, the only paths forward were:
+
+1. Build a separate Multi-row card next to the Total Revenue card showing the YoY measure — added visual clutter, abandoned.
+2. Build a custom DAX measure that returns the YoY % as a formatted text string, then put it in the Tooltip — usable but the YoY signal is hidden behind hover, doesn't read at-a-glance.
+3. Skip the YoY % visualization entirely — chosen path. YoY measure retained on `_Measures` for tooltip use; the at-a-glance YoY indicator deferred.
+
+**Feature-detect discipline.** Before recommending any new-visual field-well pattern (Reference labels, Small multiples, dynamic format strings, etc.), ask for a screenshot of the user's Build visual pane and confirm the field well exists. Don't assume the feature is present just because it's in the Microsoft documentation. New Power BI visuals roll out features incrementally across license tiers and feature flags; the GA announcement does not guarantee universal exposure.
+
+**Carry-forward to Project #3.** Same discipline applies to any incrementally-released BI tool feature — Tableau, Looker, Mode, etc. Doc-described capabilities and user-visible capabilities are not always the same set. Screenshot-first feature-detect saves the time wasted recommending a path the user can't take.
+
 ### Docker
 
 _(to be populated as encountered — containerisation patterns, docker-compose,

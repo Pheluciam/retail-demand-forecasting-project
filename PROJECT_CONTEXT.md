@@ -2,39 +2,75 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-21 (Phase 5 session 5.6 closed — all 4 remaining PBI page builds shipped in one session: Demand by Hierarchy (2 bars + matrix + Top 10 items table), Promotion & Price (column + donut + scatter, with new `is_snap_day` calculated column on DIM_CALENDAR), Seasonality & Calendar (weekday bar + Year × Month heatmap + holiday bar), Forecast vs Actual (revenue line + units line with CI bands + cat × series_type matrix). Two new mart-source measures added (`Total Units (Mart)`, `Total Revenue (Mart)`) so the matrix series_type column-split works against the forecast-vs-actual mart. 3 new LEARNINGS banked (calc COLUMN vs MEASURE scope distinction, Snowflake unquoted UPPERCASE identifiers in PBI, `(Mart)` measure naming pattern). Session also yielded portfolio-grade insights: SNAP days = 52% of revenue, weekend per-day revenue exceeds weekday per-day, FOODS_3 dominates the price/revenue scatter, monthly heatmap reveals YoY growth + Q4 seasonality. All 5 pages now have full visual builds pre-polish).
+> Last updated: 2026-05-21 (Phase 5 session 5.7 closed — polish pass on 3 of 5 PBI pages shipped end-to-end: Executive Overview (City Park theme applied, 4 KPI row compacted with shortened labels and renamed callouts, trend chart with 30-day MA dashed black overlay and $-formatted tooltips, Active Items "3K" → "3,049" via field-level data format), Demand by Hierarchy (2×2 grid with ~20px gaps, category-keyed colors via Color → fx Rules on CAT_ID for bar charts, matrix `%GT Revenue Share` prefix stripped via Show value as → No calculation, titles all renamed to natural English), Promotion & Price (column chart category-colored, donut retitled "Revenue: SNAP vs Non-SNAP Days" with `Category, percent of total` detail labels and City Park blue/purple slice colors, scatter with bubble Size bound to Total Revenue + per-series marker colors via Apply settings to dropdown in Markers, currency-formatted axes via measure-level Format = Currency on Avg Selling Price). Cross-page slicer sync confirmed for Date + Category across all 5 pages. Two new LEARNINGS banked (PBI format pane section names vary by visual type — Bars vs Columns vs Markers vs Slices; new Card visual Reference labels field well missing in basic-license PBI Desktop, blocks YoY indicator patterns relying on reference labels). Remaining for 5.8: Seasonality & Calendar polish, Forecast vs Actual finish, drill-through actions, VertiPaq Analyzer dim-cardinality check, end-to-end DAG smoke test, delete unused measures).
 
 ---
 
-> **🎯 SESSION 5.7 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
+> **🎯 SESSION 5.8 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
 >
-> Session 5.6 shipped all 4 remaining page builds in one focused session. Every page has its core visuals; nothing is title-only anymore. Session 5.7 is the polish pass that takes a "functional dashboard" to an "interview-grade portfolio piece" — small, accumulating wins that meaningfully change how the .pbix presents:
+> Session 5.7 shipped polish on Executive Overview, Demand by Hierarchy, and Promotion & Price (3 of 5 pages). All visuals on those pages now have category-keyed coloring, renamed titles, currency-formatted axes, and cross-page Date + Category slicer sync. Session 5.8 closes Phase 5 by finishing the remaining 2 pages, executing the drill-through + VertiPaq + DAG smoke-test backlog, and bundling the end-of-Phase commit:
 >
-> 1. **Cross-page slicer sync** (View → Sync slicers panel) — Date + Category propagate across all 5 pages so user filter selections persist as they navigate. Already partially set up on Promotion & Price ← Demand by Hierarchy (3 slicers); extend to all pages.
-> 2. **Drill-through actions** — Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail. New hidden page receives item context, shows per-item detail.
-> 3. **Format fixes from 5.6 backlog:**
->    - Revenue Share % → percentage format (currently displays as 0.59 / 0.11 / 0.29 instead of 59% / 11% / 29%) on matrix in Demand by Hierarchy.
->    - Orphan "Measure" on DIM_CALENDAR table → delete (was never properly homed on `_Measures`).
->    - Forecast vs Actual page layout — visuals squashed, needs spacing pass.
->    - Scatter on Promotion & Price → bubble Size field (bind to `Total Units Sold` so bubble area encodes volume).
->    - Forecast vs Actual line charts → tighten dashed/dotted line styling on Forecast / Upper 95 / Lower 95 series.
-> 4. **Theme polish** — consistent color palette across all pages (currently Power BI default blues only — could pick a 3-color portfolio theme).
+> 1. **Seasonality & Calendar — full polish pass.** Slicers already compacted by Phil during 5.7. Outstanding: weekday bar visual category-coloring + title renames; Year × Month heatmap matrix cosmetic polish (font scale, conditional-formatting color scale); Holiday bar formatting + title; theme cohesion check.
+> 2. **Forecast vs Actual — finish.** KPI card pair (Forecast Revenue card already added during 5.7; optional Forecast Units card duplicate at Horizontal 1000, Vertical 76 to mirror); line chart spacing + dashed/dotted styling on Forecast / Upper 95 / Lower 95 series; matrix cosmetic polish; theme cohesion.
+> 3. **Drill-through actions** — Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail. New hidden page receives item context, shows per-item detail.
+> 4. **Theme consistency check across all 5 pages** — City Park applied, verify it didn't snap any visuals back to default blues.
 > 5. **VertiPaq Analyzer** check on dim cardinalities — banks an interview talk-track artifact about model size + compression efficiency.
-> 6. **End-to-end DAG test run** before Phase 6 close — single date, fresh, to confirm extract → verify → dbt → verify_dbt still works after all the 5.4 dim_calendar extension + forecast layer additions.
+> 6. **End-to-end DAG test run** before Phase 6 close — single date, fresh, to confirm extract → verify → dbt → verify_dbt still works after the 5.4 dim_calendar extension + forecast layer + 5.6 mart-source measure additions + 5.7 polish.
+> 7. **Delete unused measures** — Phil flagged at end of 5.6; do this near end of 5.8 once everything still uses what it's meant to use.
+> 8. **End-of-session bundled commit + push** + PROJECT_CONTEXT.md / PROJECT_PLAN.md / LEARNINGS.md / POWERBI_PLAYBOOK.md 5.8 closeout updates.
 >
-> **Hard discipline reminders — carry forward from 5.4-5.6:**
+> **Hard discipline reminders — carry forward from 5.4-5.7:**
 >
 > - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC** when symptoms include "things blank on click" / "needs refresh" / "slicer empty even though data exists". 1-click check, highest-signal PBI diagnostic.
 > - **Cyclic reference errors → save + close + reopen the .pbix FIRST** before tracing the model. Many PBI cyclic ref errors are spurious cache desync.
-> - **Calculated COLUMN vs MEASURE** is a real distinction — same formula bar, different evaluation context. "Cannot find name [column]" on a column you can SEE in the Data pane = you clicked New measure instead of New column. (Locked 2026-05-21 in 5.6.)
-> - **Snowflake unquoted identifiers → UPPERCASE in PBI.** When writing DAX against Snowflake-imported tables, default to UPPERCASE column names or rely on Intellisense. dbt source code may be lowercase, but the Snowflake catalog stores uppercase. (Locked 2026-05-21 in 5.6.)
+> - **Calculated COLUMN vs MEASURE** is a real distinction — same formula bar, different evaluation context. "Cannot find name [column]" on a column you can SEE in the Data pane = you clicked New measure instead of New column.
+> - **Snowflake unquoted identifiers → UPPERCASE in PBI.** When writing DAX against Snowflake-imported tables, default to UPPERCASE column names or rely on Intellisense.
+> - **PBI format pane section names vary by visual type.** Bars (horizontal bar) vs Columns (vertical column) vs Markers (scatter, with per-series Apply settings to dropdown) vs Slices (donut/pie). Don't assume a uniform "Colors" section — web-check the visual type before giving paths. (Locked 2026-05-21 in 5.7.)
+> - **Basic-license PBI Desktop variants may be missing optional new-visual field wells.** New Card visual's Reference labels field well is not universally present — feature-detect on screenshot before recommending YoY/PoP indicator patterns that rely on it. (Locked 2026-05-21 in 5.7.)
 > - **PBI measure formula commits require an explicit click on the green checkmark** when EDITING. Enter does not commit — it inserts a newline.
+> - **Measure-level Format = Currency** (Measure tools ribbon) propagates to ALL axis labels and tooltips everywhere the measure is used — set once, applies everywhere. Don't bother with per-visual axis decimal-place formatting if the measure already has a Currency format.
+> - **Scatter chart legend ordering** requires a Sort by column at field level (model-wide); the visual's ... menu does not expose a Sort axis option. Trade-off: alphabetical sort is usually fine — only invest in the model-level sort if the legend ordering matters for the polish story.
 > - **Manage Aggregations is OFF the table** for this model (all-Import architecturally incompatible with UDA's DirectQuery-detail-table requirement).
 > - **`dim_calendar` extends 60 days past the last historical date** (max = 2014-05-22). `Active Items` measure uses fact's `sale_date` not dim's `calendar_date` to avoid future-horizon empty-date trap.
 > - **When 3 things look broken at once, suspect ONE root cause** and try the cheapest single-variable fix first.
-> - **Pacing locked**: 1-2 steps per response, no walls of text, code blocks only for paste-able (DAX, file paths, command strings), plain text for everything Phil is meant to READ not COPY.
+> - **Pacing locked**: 1-2 steps per response, no walls of text, code blocks only for paste-able (DAX, file paths, command strings), plain text for everything Phil is meant to READ not COPY. PowerShell: one command per code block.
 >
-> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20) remains the locked single source of truth. Pages 5.7 polish is on top of the §3.1-§3.5 page specs delivered in 5.4-5.6.
+> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20) remains the locked single source of truth. Polish work in 5.7-5.8 sits on top of the §3.1-§3.5 page specs delivered in 5.4-5.6.
+
+---
+
+## Session 5.7 closeout (2026-05-21)
+
+**Headline outcomes:**
+
+- **3 of 5 pages polished end-to-end.** Executive Overview, Demand by Hierarchy, and Promotion & Price all moved from "functional with default formatting" to "interview-grade" through one focused polish session. City Park theme applied; per-page formatting work documented below. Seasonality & Calendar and Forecast vs Actual still need their polish pass (slicers compacted on both during session breaks; visual formatting deferred to 5.8).
+- **Cross-page slicer sync established.** View → Sync slicers panel used to propagate Date + Category slicers across all 5 pages so user filter selections persist as they navigate. State slicer not synced to Forecast vs Actual (forecast trained at item-level grain; State slicer not on that page by design).
+- **Executive Overview polish.** City Park built-in PBI theme applied. 4 KPI cards repositioned into a single compact row with shortened labels (Revenue / Units Sold / Stores / SKUs) and renamed callout values. Active Items card switched from "3K" to "3,049" via Format → General → Data format → Whole number (the new-Card-visual "Display units" control is buried under field-level "Apply settings to specific measure" in the Nov 2025 redesign — required a web-doc check mid-session). Revenue 30-Day MA measure added as a dashed black overlay on the trend chart with per-series color override (the theme initially threw the chart's existing series colors off; reverted via Format → Visual → Lines → Colors). Tooltip $ formatting confirmed by setting Total Revenue's Format = Currency at measure level — propagated to every chart and tooltip using it.
+- **Demand by Hierarchy polish.** 4 visuals arranged in clean 2×2 grid with ~20px gaps (top row: 2 bar charts at H=260 W=600; bottom row: matrix W=720 + table W=500 to fit the matrix's wider %GT Revenue Share column without overlap). Category-keyed bar colors via Color → fx → Format style Rules, basing on CAT_ID with operator `contains` and 3 rules: FOODS → dark blue, HOUSEHOLD → green, HOBBIES → red. Matrix "%GT Revenue Share" column header prefix stripped via right-click on field in Values well → Show value as → No calculation. All 4 visual titles renamed to natural English (Revenue by Category / Revenue by Department / Category Hierarchy Breakdown / Top 10 Items by Revenue).
+- **Promotion & Price polish.** Avg Selling Price clustered column chart category-colored via Format → Visual → **Columns** (not Bars — vertical column charts use the Columns section in the new format pane) → Color → fx → same Rules pattern as Demand by Hierarchy. Y-axis switched to currency $0.00 / $2.00 / $4.00 / $6.00 via measure-level Format = Currency (Measure tools ribbon) on Avg Selling Price. Donut retitled "Revenue: SNAP vs Non-SNAP Days"; Detail labels → Label contents = `Category, percent of total`, Position = Outside; slice colors moved off green/red default to City Park blue/purple via Format → Visual → Slices → Colors. Scatter retitled "Price vs Revenue by Department"; bubble Size bound to Total Revenue; per-series marker colors set via Format → Visual → Markers → Apply settings to dropdown → pick FOODS/HOBBIES/HOUSEHOLD individually; custom marker shapes per category (triangle/diamond/circle) set the same way. X-axis padded to Start=2 End=6.5 to stop dots clipping at edges. Scatter legend reorder skipped — would require model-level Sort by column on CAT_ID (right-click CAT_ID → Sort by column → custom sort col), affecting every visual where CAT_ID is alphabetically sorted; trade-off not worth it for cosmetic legend ordering.
+- **Two durable LEARNINGS captured.** (a) PBI format pane section names vary by visual type — Bars (horizontal bar) vs Columns (vertical column) vs Markers (scatter, with per-series Apply settings to dropdown) vs Slices (donut/pie). The "Colors" subsection sits inside different parent sections depending on visual type; don't assume uniformity. Cost ~10 min mid-session on the column chart before Phil corrected me. (b) New Card visual (Nov 2025 GA) Reference labels field well is missing in the basic-license / stock-standard Power BI Desktop variant — only Value / Categories / Tooltips / Drill through are exposed. Blocks the YoY % indicator pattern that relies on reference labels for the secondary value; YoY measure can still be used in tooltips, but the visual pattern isn't deliverable on this variant. Feature-detect on a screenshot before recommending Reference-labels-based patterns.
+- **Format fixes from 5.6 backlog burned down.** Revenue Share % → percentage format ✅. Forecast vs Actual slicer compaction (Date 70×350, CAT_ID tile 70×340) ✅. Scatter bubble Size field bound to Total Revenue ✅. Orphan Measure on DIM_CALENDAR check ✅ (already clean — no orphan). Dashed/dotted line styling on Forecast / Upper 95 / Lower 95 series — deferred to 5.8 with the Forecast vs Actual full polish pass.
+- **One new measure used; one experimental indicator skipped.** Revenue 30-Day MA placed on Exec Overview trend chart (added in 5.6, used for the first time in 5.7). YoY % indicator pill skipped due to the Reference labels limitation above; measure retained on `_Measures` for tooltip use.
+
+**Files updated this session (Phase 5 session 5.7):**
+
+- `LEARNINGS.md` — 2 new entries appended to the Power BI section: (a) PBI format pane section names vary by visual type — Bars / Columns / Markers / Slices with web-check discipline; (b) New Card visual Reference labels field well variant-dependent — feature-detect before recommending YoY/PoP indicator patterns.
+- `PROJECT_CONTEXT.md` — this file. Header date bumped; 5.7 opening directive replaced with 5.8 opening directive carrying forward all discipline rules from 5.4-5.6 plus the 2 new 5.7 rules; 5.7 closeout block inserted above the 5.6 closeout.
+- `PROJECT_PLAN.md` — Status block bumped (5.6 closed; 5.7 closed; 5.8 next — finish remaining 2 pages + drill-through + VertiPaq + DAG smoke test + bundled commit).
+- `POWERBI_PLAYBOOK.md` — Phase E polish checklist updated: cross-page slicer sync ✅ (Date + Category across 5 pages), theme polish partial (City Park applied + 3 of 5 pages styled end-to-end), drill-through + VertiPaq + audit pending.
+- `powerbi/retail_demand_forecasting.pbix` — saved. All 5 pages have full visual builds; 3 of 5 now fully polished. Measure count unchanged: 20 measures + 1 calculated column on DIM_CALENDAR (`is_snap_day`).
+
+**Pending / deferred to session 5.8:**
+
+- Seasonality & Calendar — full polish pass (slicers already compact; need theme cohesion + visual coloring + title renames + heatmap cosmetic polish).
+- Forecast vs Actual — finish (KPI card pair completion + optional Forecast Units card duplicate + line chart spacing + dashed/dotted line styling on Forecast / Upper 95 / Lower 95 + matrix cosmetic polish + theme cohesion).
+- Drill-through actions (Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail).
+- Theme consistency check across all 5 pages.
+- VertiPaq Analyzer check on dim cardinalities (interview talk-track artifact).
+- End-to-end DAG smoke test (single date) before final Phase 6 close.
+- Delete unused measures once 5.8 polish is complete (Phil flagged at end of 5.6).
+- README update with screenshots of all 5 PBI pages (Phase 6).
+- POWERBI_PIPELINE.md fill-in for sessions 5.2-5.7 (Phase 6).
 
 ---
 

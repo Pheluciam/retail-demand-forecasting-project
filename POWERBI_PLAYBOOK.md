@@ -337,10 +337,14 @@ Do these in order. Don't skip steps.
 
 **Phase E — Polish + commit.**
 
-- [ ] Cross-page slicer sync (Date + State + Category).
+- [x] Cross-page slicer sync (Date + Category synced to all 5 pages; State synced to 4 of 5 — not on Forecast vs Actual by design). *(done 2026-05-21 session 5.7)*
+- [x] Theme polish — City Park built-in theme applied; per-page formatting end-to-end on 3 of 5 pages (Executive Overview, Demand by Hierarchy, Promotion & Price). Seasonality & Calendar + Forecast vs Actual deferred to 5.8. *(done 2026-05-21 session 5.7 — partial)*
+- [ ] Seasonality & Calendar polish (5.8 — slicers compact; need theme cohesion + visual coloring + title renames + heatmap cosmetic polish).
+- [ ] Forecast vs Actual polish (5.8 — KPI card pair completion + line chart spacing + dashed/dotted styling on Forecast / Upper 95 / Lower 95 + matrix cosmetic polish).
 - [ ] Drill-through actions (Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail).
-- [ ] Theme polish.
 - [ ] VertiPaq Analyzer check on dims.
+- [ ] Delete unused measures (final scan once 5.8 polish complete).
+- [ ] End-to-end DAG smoke test (single date, fresh).
 - [ ] Phase-boundary structural audit + bundled commit.
 
 ---
