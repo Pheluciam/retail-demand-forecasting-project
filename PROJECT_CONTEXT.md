@@ -2,30 +2,71 @@
 
 > Live state of the project. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-20 (Phase 5 session 5.5 closed — Pause Visuals discovered as silent root cause of an entire session's worth of "click → blank → refresh" misery after ~3 hours of misdirected diagnostics; spurious cyclic reference error on FACT_DAILY_SALES cleared by save+close+reopen of the .pbix; Executive Overview cards re-bound and line chart converted to dual-axis (revenue left, units right); Demand by Hierarchy page given title + 3 slicers (Date / State / Category) per playbook §3.2; Promotion & Price + Seasonality & Calendar + Forecast vs Actual pages added as title-only stubs; 3 new LEARNINGS banked (Pause Visuals as silent root cause, spurious cyclic ref + reopen workaround, new Card visual GA blank-render); 3 TEACHING_PREFERENCES discipline rules locked (Pause Visuals check FIRST, cyclic ref → reopen before trace, one root cause when three things break together)).
+> Last updated: 2026-05-21 (Phase 5 session 5.6 closed — all 4 remaining PBI page builds shipped in one session: Demand by Hierarchy (2 bars + matrix + Top 10 items table), Promotion & Price (column + donut + scatter, with new `is_snap_day` calculated column on DIM_CALENDAR), Seasonality & Calendar (weekday bar + Year × Month heatmap + holiday bar), Forecast vs Actual (revenue line + units line with CI bands + cat × series_type matrix). Two new mart-source measures added (`Total Units (Mart)`, `Total Revenue (Mart)`) so the matrix series_type column-split works against the forecast-vs-actual mart. 3 new LEARNINGS banked (calc COLUMN vs MEASURE scope distinction, Snowflake unquoted UPPERCASE identifiers in PBI, `(Mart)` measure naming pattern). Session also yielded portfolio-grade insights: SNAP days = 52% of revenue, weekend per-day revenue exceeds weekday per-day, FOODS_3 dominates the price/revenue scatter, monthly heatmap reveals YoY growth + Q4 seasonality. All 5 pages now have full visual builds pre-polish).
 
 ---
 
-> **🎯 SESSION 5.6 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
+> **🎯 SESSION 5.7 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
 >
-> Session 5.5 burned most of its energy on a misdirected diagnostic chain (cat_id slicer empty → Manage Aggregations red herring → cyclic reference red herring → empty card visual red herring → finally: Optimize → Pause Visuals was on). Net visual output for 5.5: Executive Overview page now has 4 working KPI cards + dual-axis trend chart (one polish step from playbook §3.1); Demand by Hierarchy has title + 3 slicers; pages 3-5 exist as title-only stubs. Session 5.6 completes the visual builds per `POWERBI_PLAYBOOK.md` §3.2-§3.5:
+> Session 5.6 shipped all 4 remaining page builds in one focused session. Every page has its core visuals; nothing is title-only anymore. Session 5.7 is the polish pass that takes a "functional dashboard" to an "interview-grade portfolio piece" — small, accumulating wins that meaningfully change how the .pbix presents:
 >
-> 1. **Demand by Hierarchy** (§3.2) — finish: revenue-by-cat_id bar + revenue-by-dept_id bar + hierarchy matrix (cat → dept → item). Slicers already in place.
-> 2. **Promotion & Price** (§3.3) — 3 slicers + Avg Selling Price by Category column + Revenue by SNAP Day donut (requires new calculated column `is_snap_day` on `DIM_CALENDAR`) + Revenue vs Avg Price scatter.
-> 3. **Seasonality & Calendar** (§3.4) — 3 slicers + Weekend vs Weekday bar + Year × Month heatmap + Holiday event impact bar.
-> 4. **Forecast vs Actual** (§3.5) — Date slicer extended through forecast horizon + Category slicer + Actual + Forecast revenue line on `observation_date` + 95% CI ribbon between `Forecast Lower 95` and `Forecast Upper 95` + cat × series_type matrix.
+> 1. **Cross-page slicer sync** (View → Sync slicers panel) — Date + Category propagate across all 5 pages so user filter selections persist as they navigate. Already partially set up on Promotion & Price ← Demand by Hierarchy (3 slicers); extend to all pages.
+> 2. **Drill-through actions** — Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail. New hidden page receives item context, shows per-item detail.
+> 3. **Format fixes from 5.6 backlog:**
+>    - Revenue Share % → percentage format (currently displays as 0.59 / 0.11 / 0.29 instead of 59% / 11% / 29%) on matrix in Demand by Hierarchy.
+>    - Orphan "Measure" on DIM_CALENDAR table → delete (was never properly homed on `_Measures`).
+>    - Forecast vs Actual page layout — visuals squashed, needs spacing pass.
+>    - Scatter on Promotion & Price → bubble Size field (bind to `Total Units Sold` so bubble area encodes volume).
+>    - Forecast vs Actual line charts → tighten dashed/dotted line styling on Forecast / Upper 95 / Lower 95 series.
+> 4. **Theme polish** — consistent color palette across all pages (currently Power BI default blues only — could pick a 3-color portfolio theme).
+> 5. **VertiPaq Analyzer** check on dim cardinalities — banks an interview talk-track artifact about model size + compression efficiency.
+> 6. **End-to-end DAG test run** before Phase 6 close — single date, fresh, to confirm extract → verify → dbt → verify_dbt still works after all the 5.4 dim_calendar extension + forecast layer additions.
 >
-> **Hard discipline reminders locked at 5.5 close — read these FIRST before proposing any PBI step:**
+> **Hard discipline reminders — carry forward from 5.4-5.6:**
 >
-> - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC.** If user reports "things disappear when I click", "I keep having to refresh", "the visual is blank", "the slicer is empty even though data exists" — the very first thing to check is the Optimize tab → Pause Visuals icon. If the icon shows a Play arrow (▶), visuals are paused (click to resume). If it shows a Pause symbol (II), visuals are live. Counterintuitive UI: the icon shown is the action that would happen on click, not the current state. 1-click check, highest signal of any PBI diagnostic. Do NOT trace M-code, DAX, relationships, calculated columns, or measure dependencies until this is confirmed off.
-> - **Cyclic reference errors → save + close + reopen the .pbix FIRST.** Many PBI cyclic ref errors are spurious / cache desync, documented by crossjoin.co.uk. Only trace the model after a clean reopen fails to clear it. Burned ~30 min in 5.5 tracing a non-existent cycle.
-> - **PBI measure formula commits require an explicit click on the green checkmark icon. Enter does NOT commit when editing an existing measure** — it inserts a newline. Always include "click the green checkmark" when prescribing measure edits. (Carried from 5.4.)
-> - **Manage Aggregations is OFF the table** for this model. UDA requires DirectQuery on the Detail Table per Microsoft Learn; our model is all-Import. The `AGG_SALES_DAILY` + `AGG_SALES_DAILY_ITEM_CAT` tables stay in dbt+Snowflake only for portfolio narrative. (Carried from 5.4.)
-> - **`dim_calendar` extends 60 days past the last historical date** (max = 2014-05-22). DAX `Active Items` measure uses fact's `sale_date` not dim_calendar's `calendar_date` to avoid the future-horizon empty-date trap. (Carried from 5.4.)
-> - **When 3 things look broken at once, suspect ONE root cause.** In 5.5, empty slicers + blank cards + cyclic ref error all healed with one click (Pause Visuals off). Isolate one variable, try the cheapest single-variable fix first.
+> - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC** when symptoms include "things blank on click" / "needs refresh" / "slicer empty even though data exists". 1-click check, highest-signal PBI diagnostic.
+> - **Cyclic reference errors → save + close + reopen the .pbix FIRST** before tracing the model. Many PBI cyclic ref errors are spurious cache desync.
+> - **Calculated COLUMN vs MEASURE** is a real distinction — same formula bar, different evaluation context. "Cannot find name [column]" on a column you can SEE in the Data pane = you clicked New measure instead of New column. (Locked 2026-05-21 in 5.6.)
+> - **Snowflake unquoted identifiers → UPPERCASE in PBI.** When writing DAX against Snowflake-imported tables, default to UPPERCASE column names or rely on Intellisense. dbt source code may be lowercase, but the Snowflake catalog stores uppercase. (Locked 2026-05-21 in 5.6.)
+> - **PBI measure formula commits require an explicit click on the green checkmark** when EDITING. Enter does not commit — it inserts a newline.
+> - **Manage Aggregations is OFF the table** for this model (all-Import architecturally incompatible with UDA's DirectQuery-detail-table requirement).
+> - **`dim_calendar` extends 60 days past the last historical date** (max = 2014-05-22). `Active Items` measure uses fact's `sale_date` not dim's `calendar_date` to avoid future-horizon empty-date trap.
+> - **When 3 things look broken at once, suspect ONE root cause** and try the cheapest single-variable fix first.
 > - **Pacing locked**: 1-2 steps per response, no walls of text, code blocks only for paste-able (DAX, file paths, command strings), plain text for everything Phil is meant to READ not COPY.
 >
-> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20 at close of 5.4) remains the locked single source of truth. Pages 5.6 build follows §3.2–§3.5 exactly.
+> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20) remains the locked single source of truth. Pages 5.7 polish is on top of the §3.1-§3.5 page specs delivered in 5.4-5.6.
+
+---
+
+## Session 5.6 closeout (2026-05-21)
+
+**Headline outcomes:**
+
+- **All 4 remaining PBI page builds shipped in one session.** Demand by Hierarchy got its 2 bar charts (Revenue by Category, Revenue by Department) + Hierarchy matrix (cat → dept → item with Total Revenue + Total Units Sold + Revenue Share %) + Top 10 items by revenue table. Promotion & Price got its 3 slicers (copied from Demand by Hierarchy with sync slicers enabled), new `is_snap_day` calculated column on DIM_CALENDAR, Avg Selling Price by Category column chart, Revenue by SNAP Day donut, and Revenue vs Avg Price scatter (bubble per dept_id, colored by cat_id). Seasonality & Calendar got Weekend vs Weekday bar, Year × Month heatmap matrix (with YEAR data-type fix from Decimal → Whole number and MONTH_NAME sort-by-MONTH fix), and Holiday event impact bar. Forecast vs Actual got Date + Category slicers (no State — forecast trained item-level grain), 2 new mart-source measures (`Total Units (Mart)`, `Total Revenue (Mart)`) to make the matrix series_type column split work, Revenue line chart (Actual + Forecast over observation_date), Units line chart with 4 series (Actual + Forecast + Upper 95 + Lower 95 as CI bands), and cat × series_type matrix.
+- **Three durable LEARNINGS captured.** (a) PBI calculated COLUMN vs MEASURE — same formula bar, different evaluation context. The "Cannot find name [column]" error on a verifiable column is the canonical symptom of clicking New measure when you wanted New column. Cost ~10 min mid-session before the right ribbon button was clicked. (b) Snowflake unquoted identifiers stored as UPPERCASE carry through to PBI column names — lowercase dbt source code → uppercase Snowflake catalog → uppercase PBI columns. DAX is case-insensitive for references but bare names still need to match the catalog. (c) `(Mart)` measure naming pattern — when same metric lives on two source tables (fact-sourced and mart-sourced), suffix the mart-sourced version `(Mart)` rather than renaming the original. The suffix is self-documenting and lets the field list show them side-by-side alphabetically.
+- **Portfolio-grade insights surfaced by the new pages.** (a) SNAP days = 52.19% of revenue ($52.56M of $100.70M) — strong correlation between SNAP benefits distribution days and shopping behaviour. (b) Weekend per-day revenue exceeds weekday per-day: 35M / 2 weekend days = $17.5M/day vs 66M / 5 weekday days = $13.2M/day. Weekend over-indexes ~33%. (c) Top 10 items concentrate only ~5.7% of total revenue ($5.74M of $100.70M) — confirms classic retail long-tail distribution. (d) Year × Month heatmap reveals clean YoY growth + Q4 seasonality (October/November consistently strongest, January consistently weakest, Q4 column intensity increases each year). (e) Scatter shows FOODS_3 as cheap-price/high-volume outlier (~$2.80 avg / $40M revenue) — classic price-elasticity story.
+- **Two new DAX measures added** to `_Measures`: `Total Units (Mart) = SUM(MART_FORECAST_VS_ACTUAL[UNITS])` and `Total Revenue (Mart) = SUM(MART_FORECAST_VS_ACTUAL[REVENUE_USD])`. Required for the Forecast vs Actual matrix because the existing fact-sourced measures can't be filtered by series_type (no path from MART_FORECAST_VS_ACTUAL.series_type to FACT_DAILY_SALES).
+- **One new calculated column** added to `DIM_CALENDAR`: `is_snap_day = IF(DIM_CALENDAR[SNAP_CA]=1 || DIM_CALENDAR[SNAP_TX]=1 || DIM_CALENDAR[SNAP_WI]=1, TRUE, FALSE)`. Powers the Revenue by SNAP Day donut on Promotion & Price page.
+- **Cross-session DAG/forecast layer remained verified.** No data layer touched this session — pure PBI work. The 7-section forecast layer verification from 5.4 still PASSes.
+- **Measure audit at session close.** Cross-referenced every measure on `_Measures` against actual usage across all 5 page builds. 15 in active use; 2 redundant (superseded by different build patterns: `SNAP Day Revenue` replaced by `is_snap_day` calc column + Total Revenue donut; `Weekend Revenue %` replaced by IS_WEEKEND axis + Total Revenue bar) — both deleted from model; DAX retained in playbook §2.2/§2.3 for reference. 5 time-intelligence measures (Revenue PY, Revenue YoY $, Revenue YoY %, Revenue YTD, Revenue 30-Day MA) kept as earmarked for 5.7 Executive Overview polish (YoY indicators, YTD pills). Final measure count on `_Measures`: 20 measures + 1 calculated column on `DIM_CALENDAR` (`is_snap_day`).
+
+**Files updated this session (Phase 5 session 5.6):**
+
+- `LEARNINGS.md` — 3 new entries appended to the Power BI section: (a) PBI calculated COLUMN vs MEASURE distinction with clipboard-vs-turnstile mental model; (b) Snowflake unquoted UPPERCASE identifiers carrying through to PBI column names with DAX-authoring discipline rule; (c) `(Mart)` measure naming pattern for forecast-aware models, with carry-forward to Project #3 Data Vault scenarios.
+- `PROJECT_CONTEXT.md` — this file. Header date bumped; 5.6 opening directive replaced with 5.7 polish-pass directive carrying forward all discipline rules from 5.4-5.6; 5.6 closeout block inserted above the 5.5 closeout.
+- `PROJECT_PLAN.md` — Status block bumped (5.5 closed; 5.6 closed; 5.7 next — polish + drill-through + theme + DAG smoke test).
+- `powerbi/retail_demand_forecasting.pbix` — saved. All 5 pages have full visual builds. Total: ~22 visuals across the 5 pages (4 KPI cards + dual-axis trend on Exec Overview; 3 slicers + 2 bars + matrix + Top 10 table on Demand by Hierarchy; 3 slicers + column + donut + scatter on Promotion & Price; 3 slicers + weekday bar + heatmap + holiday bar on Seasonality & Calendar; 2 slicers + 2 line charts + matrix on Forecast vs Actual). 22 measures + 1 calculated column on `_Measures` / DIM_CALENDAR.
+
+**Pending / deferred to session 5.7:**
+
+- Cross-page slicer sync (View → Sync slicers panel for Date + Category).
+- Drill-through actions (Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail).
+- Format fixes: Revenue Share % → percentage; orphan "Measure" on DIM_CALENDAR → delete; Forecast vs Actual page layout (visuals squashed); scatter bubble Size field; dashed/dotted line styling on forecast charts.
+- Theme polish (3-color portfolio palette beyond PBI default).
+- VertiPaq Analyzer check on dim cardinalities (interview talk-track artifact).
+- End-to-end DAG smoke test (single date) before final Phase 6 close.
+- README update with screenshots of all 5 PBI pages (Phase 6).
+- POWERBI_PIPELINE.md fill-in for sessions 5.2-5.6 (Phase 6).
 
 ---
 

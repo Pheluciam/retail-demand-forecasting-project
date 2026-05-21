@@ -1260,6 +1260,55 @@ Symptom: created a fresh Card visual on Executive Overview page, dragged `Total 
 
 **Why this matters for portfolio narrative.** Tonight's confusion (blank card AND paused visuals AND spurious cyclic ref all happening at once) reinforces a senior-DE diagnostic principle: **isolate one variable at a time**. When three things look broken, fixing all three with one action (turn off Pause Visuals) tells you they were all symptoms, not three independent bugs. Locked into a teaching-preferences carry-forward.
 
+### 2026-05-21 — Power BI calculated COLUMN vs MEASURE: same formula bar, different evaluation context
+
+Discovered during Phase 5 session 5.6 while adding `is_snap_day` to `DIM_CALENDAR` for the Promotion & Price page. Phil clicked "New measure" instead of "New column" — the formula bar looked identical, but every column reference (`DIM_CALENDAR[SNAP_CA]`, `[SNAP_TX]`, `[SNAP_WI]`) lit up with red squigglies and the error tooltip read "Cannot find name SNAP_CA". Confirmed the columns existed on DIM_CALENDAR via the Data pane; re-typing using Intellisense didn't fix it; only switching from New measure to New column cleared the error.
+
+**The real distinction:**
+
+- **Calculated COLUMN** evaluates in **row context** — runs once per row of the host table. Bare column references like `DIM_CALENDAR[SNAP_CA]` resolve to "the value of SNAP_CA on THIS row." Cheap to read in DAX.
+- **MEASURE** evaluates in **filter context** — runs once per cell of a visual, with no inherent row context. Bare column references don't make sense (there's no single row to evaluate against) so DAX requires an aggregator (SUM, AVERAGEX, etc.). The "Cannot find name" error is PBI's slightly misleading way of saying "this reference can't resolve without row context."
+
+**Mental model — clipboard-vs-turnstile.** A calculated column is like a clipboard handed to each row as it walks past — the row context is its identity. A measure is like a turnstile counter at the gate — it sees the FLOW (filter context) of rows passing through but has no concept of "this row" without an aggregator wrapping it.
+
+**Why the same formula bar exposes both:** Microsoft chose UI parsimony over discoverability. The exact same DAX syntax can mean two completely different things depending on whether you clicked New column or New measure five seconds ago. Discipline rule: ALWAYS double-check the ribbon button before pasting a formula.
+
+**Carry-forward.** Any time PBI surfaces "Cannot find name [column]" on a reference Phil can verify exists in the Data pane, the FIRST diagnostic check is "did I click New measure or New column?" — not "is the column name wrong?", not "is there a typo?", not "is Intellisense broken?". Saved ~10 min of misdirected diagnostics this session; would have saved more if checked first.
+
+### 2026-05-21 — Snowflake unquoted identifiers stored as UPPERCASE carry through to Power BI column names
+
+Surfaced during Phase 5 session 5.6 when the `is_snap_day` calculated column formula was authored as `DIM_CALENDAR[snap_ca]` (lowercase, matching dbt model source-of-truth) and lit up with red squigglies in PBI. The actual columns visible in PBI's Data pane were `SNAP_CA`, `SNAP_TX`, `SNAP_WI` — all uppercase.
+
+**The chain:** dbt models write columns in lowercase (`snap_ca`, `snap_tx`, `snap_wi`). Snowflake stores unquoted identifiers as UPPERCASE (documented behavior — applies to all CREATE TABLE / SELECT / column references that aren't double-quoted). When PBI imports via the Snowflake connector, it reads whatever Snowflake returns — uppercase. So lowercase dbt source code → uppercase Snowflake catalog → uppercase PBI column names. DAX is case-insensitive for column REFERENCES but the column NAMES still need to match what PBI catalogued.
+
+**Practical implication for DAX authoring:** when writing DAX measures or calculated columns that reference columns in a Snowflake-imported semantic model, default to UPPERCASE column names — or use Intellisense, which always pulls the exact catalog name. Don't free-type the column name in lowercase even though it works in your dbt source code.
+
+**Edge cases worth knowing:**
+
+- Double-quoted Snowflake identifiers preserve case (`CREATE TABLE "MyTable"` stays "MyTable"). The dbt convention to use unquoted snake_case is what produces clean uppercase in the catalog.
+- Identifiers with special characters (spaces, hyphens, leading digits) get auto-quoted by some tools and may retain original casing — another reason to stick to plain snake_case throughout the stack.
+- BigQuery is case-SENSITIVE for column names by default — same dbt source produces case-preserving column names. The lesson here is Snowflake-specific.
+
+**Carry-forward.** When DAX authoring against a Snowflake-imported model and a bare column reference doesn't resolve: check casing FIRST (UPPERCASE for unquoted Snowflake), table name SECOND, column existence in the Data pane THIRD. Cheapest checks first.
+
+### 2026-05-21 — The `(Mart)` measure naming pattern: same metric, two source tables, two measures
+
+Discovered during Phase 5 session 5.6 while building the Forecast vs Actual matrix. Playbook §3.5 specified the matrix as `Rows=cat_id, Columns=series_type, Values=Total Units, Total Revenue` — but the existing `Total Revenue` and `Total Units Sold` measures (from playbook §2.1) source from `FACT_DAILY_SALES`, which has no `series_type` column. Putting `series_type` in matrix Columns would have no filtering effect on FACT-sourced measures: both the "actual" and "forecast" columns would show the same $100.70M total because the column-level filter can't reach the source table.
+
+**Fix:** added two NEW measures — `Total Units (Mart)` and `Total Revenue (Mart)` — that source from `MART_FORECAST_VS_ACTUAL` (the dbt mart that UNIONs actuals and forecasts with a `series_type` discriminator). The matrix now uses these mart-sourced measures, the column filter does its job, and we get a clean actual vs forecast split: FOODS shows 25.9M actual units / $59.7M revenue alongside 696K forecast units / $1.7M revenue.
+
+**The naming convention.** Suffix the mart-sourced version with `(Mart)` rather than renaming the fact-sourced original. Reasons:
+
+1. The fact-sourced version is the canonical company-wide measure — every page outside Forecast vs Actual uses it. Renaming it would force ripple changes.
+2. The `(Mart)` suffix is a self-documenting signal that the measure has different source semantics. A future reader sees the suffix and knows to check the source table.
+3. The two measures coexist on `_Measures` and sort alphabetically together — visible side-by-side in field lists, making the relationship obvious.
+
+**When to reach for this pattern.** Any time you have two source tables that represent the same metric at different scopes — actuals vs forecast, current vs prior period at table level (not measure level), unified vs filtered subsets. Better than trying to consolidate into one measure with complex CALCULATE logic — explicit beats clever in DAX as much as it does in Python.
+
+**Anti-pattern to avoid.** Don't reuse the same measure name on two different tables (PBI prevents this anyway — measure names are globally unique in the model). Don't use ambiguous suffixes like `(v2)` or `(new)`. The suffix should signal the SOURCE or SCOPE difference, not version.
+
+**Carry-forward to Project #3.** When Data Vault 2.0 hubs/satellites + Gold information marts both expose the same metric (revenue, units, customer count), the same pattern applies: explicit suffix on the mart-sourced measure (`Revenue (Gold)` alongside `Revenue (Vault)`), let the field list show them side by side.
+
 ### Docker
 
 _(to be populated as encountered — containerisation patterns, docker-compose,

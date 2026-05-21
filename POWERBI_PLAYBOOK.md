@@ -130,6 +130,8 @@ CALCULATE (
 )
 ```
 
+**`SNAP Day Revenue` deleted from the model 2026-05-21 (Phase 5 session 5.6 close).** The Promotion & Price donut was built using the `is_snap_day` calculated column on `DIM_CALENDAR` as Legend + `Total Revenue` as Values — equally valid build pattern, makes the dedicated `SNAP Day Revenue` measure redundant. DAX retained here in the playbook for reference / future re-creation if a Card-style "SNAP vs non-SNAP" split is wanted later.
+
 ### 2.3 Seasonality & Calendar measures
 
 ```dax
@@ -142,6 +144,8 @@ DIVIDE (
 Holiday Revenue =
 CALCULATE ( [Total Revenue], DIM_CALENDAR[is_holiday] = TRUE )
 ```
+
+**`Weekend Revenue %` deleted from the model 2026-05-21 (Phase 5 session 5.6 close).** The Seasonality & Calendar weekend-vs-weekday comparison was built as a 2-bar column chart with `IS_WEEKEND` on the X-axis and `Total Revenue` on the Y-axis — the chart itself surfaces the split visually, making the dedicated percentage measure redundant. DAX retained for reference; recreate if a KPI-card-style "Weekend Revenue %" pill is ever wanted.
 
 ### 2.4 Forecast vs Actual measures (new, source `MART_FORECAST_VS_ACTUAL`)
 
@@ -181,7 +185,15 @@ CALCULATE (
     SUM ( MART_FORECAST_VS_ACTUAL[units_lower_95] ),
     MART_FORECAST_VS_ACTUAL[series_type] = "forecast"
 )
+
+Total Units (Mart) =
+SUM ( MART_FORECAST_VS_ACTUAL[UNITS] )
+
+Total Revenue (Mart) =
+SUM ( MART_FORECAST_VS_ACTUAL[REVENUE_USD] )
 ```
+
+**Added 2026-05-21 (Phase 5 session 5.6).** `Total Units (Mart)` and `Total Revenue (Mart)` are the mart-sourced equivalents of the fact-sourced §2.1 measures. They exist specifically so the Forecast vs Actual matrix can split by `series_type` (a column that lives on `MART_FORECAST_VS_ACTUAL` but NOT on `FACT_DAILY_SALES`). Naming pattern: same metric name + `(Mart)` suffix. Pattern carries forward to any future "actual vs forecast" or "current vs prior" mart-style scenario.
 
 ### 2.5 Time intelligence measures (5 — Phase 5.5)
 
@@ -249,7 +261,7 @@ AVERAGEX (
 - Category slicer.
 - Line chart: Actual Revenue + Forecast Revenue across `observation_date`. Both lines on same axis. Forecast line styled differently (dashed).
 - Confidence-interval ribbon: shaded area between `Forecast Lower 95` and `Forecast Upper 95` — use a stacked area chart trick or the Power BI ribbon chart.
-- Forecast vs Actual matrix: rows=cat_id; columns=series_type ('actual', 'forecast'); values=Total Units, Total Revenue.
+- Forecast vs Actual matrix: rows=cat_id; columns=series_type ('actual', 'forecast'); values=`Total Units (Mart)`, `Total Revenue (Mart)`. **Important** — these mart-sourced measures (`SUM(MART_FORECAST_VS_ACTUAL[UNITS])` / `SUM(MART_FORECAST_VS_ACTUAL[REVENUE_USD])`) are REQUIRED here; the fact-sourced `Total Units Sold` / `Total Revenue` from §2.1 cannot be filtered by `series_type` because `FACT_DAILY_SALES` has no `series_type` column. Both columns of the matrix would render the same total. The `(Mart)` suffix naming convention disambiguates the two same-metric / different-source measures in the field list. Locked 2026-05-21 (Phase 5 session 5.6).
 
 ---
 
