@@ -16,8 +16,6 @@
 |---|---|---|---|
 | `FACT_DAILY_SALES` | **Import** | Hidden (measures only) | Pruned columns; VertiPaq compresses comfortably toward / under 100 MB |
 | `FACT_FORECAST_DAILY` | **Import** | Hidden | New 28-day forecast fact (~85K rows) |
-| `AGG_SALES_DAILY` | **Import** | Hidden, wired as user-defined aggregation | Day-grain rollup of `FACT_DAILY_SALES` |
-| `AGG_SALES_DAILY_ITEM_CAT` | **Import** | Hidden, wired as user-defined aggregation | Day × cat_id rollup |
 | `MART_FORECAST_VS_ACTUAL` | **Import** | Visible (powers the Forecast vs Actual page directly) | UNION of actuals + forecast with `series_type` discriminator |
 | `DIM_CALENDAR` | **Import** | Visible, **marked as Date Table** | Conformed dim |
 | `DIM_ITEM` | **Import** | Visible | Conformed dim |
@@ -319,7 +317,7 @@ Do these in order. Don't skip steps.
 - [ ] Open `retail_demand_forecasting.pbix`.
 - [ ] Delete all 5 currently-loaded tables (DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, MART_EXECUTIVE_OVERVIEW). Pages + slicers + visuals stay (will rebind when measures exist).
 - [ ] Get Data → Snowflake → connect with POWERBI_READER role. Choose Import mode for ALL tables.
-- [ ] Select: AGG_SALES_DAILY, AGG_SALES_DAILY_ITEM_CAT, DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, FACT_FORECAST_DAILY, MART_FORECAST_VS_ACTUAL.
+- [ ] Select: DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, FACT_FORECAST_DAILY, MART_FORECAST_VS_ACTUAL. *(Updated 2026-05-20 per §1.4 — original list included AGG_SALES_DAILY and AGG_SALES_DAILY_ITEM_CAT; UDA path abandoned, agg tables retained in dbt+Snowflake only.)*
 - [ ] In Power Query, on `FACT_DAILY_SALES`: drop `sale_key`, `date_key` columns (pruning for size). Optionally drop `sell_price` if size needs trimming.
 - [ ] Apply / Load.
 - [ ] Verify .pbix file size < 100 MB.
@@ -327,8 +325,8 @@ Do these in order. Don't skip steps.
 - [ ] Mark `DIM_CALENDAR` as Date Table on `calendar_date`.
 - [ ] Create `_Measures` table (Modeling → New table → `_Measures = ROW("Placeholder", BLANK())`). Hide Placeholder column.
 - [ ] Recreate all measures from §2 on `_Measures`.
-- [ ] Manage Aggregations: register `AGG_SALES_DAILY` (precedence 50, summary table behind FACT_DAILY_SALES) and `AGG_SALES_DAILY_ITEM_CAT` (precedence 30). Map every column.
-- [ ] Hide: FACT_DAILY_SALES, FACT_FORECAST_DAILY, AGG_SALES_DAILY, AGG_SALES_DAILY_ITEM_CAT.
+- [ ] ~~Manage Aggregations: register `AGG_SALES_DAILY` and `AGG_SALES_DAILY_ITEM_CAT`.~~ *(SUPERSEDED 2026-05-20 per §1.4 — UDA architecturally incompatible with all-Import storage; step skipped.)*
+- [ ] Hide: FACT_DAILY_SALES, FACT_FORECAST_DAILY. *(Updated 2026-05-20 — AGG_SALES_DAILY and AGG_SALES_DAILY_ITEM_CAT no longer loaded into the PBI model, so no Hide step needed for them.)*
 - [ ] Verify Executive Overview page renders correctly with the new measures.
 
 **Phase D — Page builds.**

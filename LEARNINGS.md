@@ -1018,6 +1018,81 @@ Reverted the YAML edit post-test so the project state is clean.
 
 **Carry-forward**: use failure injection as a closing validation step whenever wiring up an orchestration chain. Flip one value, trigger, observe the clean halt, revert. Especially valuable for portfolio purposes because it produces a credible "yes, the failure path actually works" screenshot pair.
 
+### 2026-05-22 — Airflow `schedule=None` is the correct pattern for portfolio-demo DAGs
+
+Surfaced during Phase 5 session 5.9 end-to-end smoke test. Original DAG was declared with `schedule="@daily"` + `catchup=False` — the conventional "scheduled production cron" pattern. On unpausing the DAG to recover from a pause-mid-run trap (see next entry), Airflow's scheduler immediately auto-created a DagRun for the most recent missed scheduled interval — which for a 2026 wall-clock run meant a DagRun with `logical_date` ≈ today's date. That DagRun then tried to extract M5 data for 2026-05-22, which doesn't exist in Azure SQL (M5 dataset ends ~2016), and failed at `extract_one_day`.
+
+**Why this is wrong for a portfolio-demo DAG**: a portfolio project's DAG should only ever run when the operator triggers it on command. Running automatically on unpause produces phantom DagRuns that the operator never asked for, complicates the run-history narrative (extra red squares in the UI), and creates a Snowflake compute cost we didn't intend. The "scheduled production cron" framing is the wrong framing for a project that exists to demonstrate the orchestration pattern, not to run on a real ops cadence.
+
+**The fix**: change the `@dag` decorator's `schedule="@daily"` → `schedule=None`. With `schedule=None`, the Airflow scheduler never auto-creates a DagRun. The only way to run is via UI "Trigger DAG w/ config" with an explicit logical date, or via CLI `airflow dags trigger` / `airflow dags test`. Pause/unpause becomes a near-no-op (still controls whether scheduler queues tasks within existing DagRuns, but no longer drives DagRun creation at all).
+
+**Pattern decision criteria**:
+
+- **`schedule="@daily"` (or any cron) + `catchup=False`**: use when you have a real ops cadence (a database that genuinely emits new data daily and you want Airflow to fetch it automatically). Accept the discipline that unpausing creates a DagRun.
+- **`schedule=None`**: use for portfolio-demo DAGs, ad-hoc backfill DAGs, manual-only orchestration scenarios. Operator controls every DagRun explicitly. No phantom runs ever.
+- **`schedule="@daily"` + `catchup=True`**: use when historical backfill on first start is intentional (e.g., onboarding a new source where you want every missed day backfilled). Almost never the right default — explicit opt-in only.
+
+**The `catchup=False` flag is still kept in code** even with `schedule=None`, as a belt-and-braces signal of intent: even if someone later changes the schedule back to `@daily` for some reason, catchup=False prevents the 12-year backfill cliff. Defense-in-depth costs nothing.
+
+**Portfolio narrative shift**: pivoting from `@daily` to `None` doesn't weaken the interview story — it strengthens it. "I built this DAG with `schedule=None` so the operator controls every run; the date-partitioned extract pattern works because every DagRun gets a logical_date via config, and the extract task reads `context['ds']` to pull the right slice. Production deployment would flip this to a real cron schedule, but for a portfolio-demo where I want a single repeatable run on command, schedule=None is correct." That's a senior-engineer architectural framing.
+
+**Carry-forward for Project #3**: default new orchestration DAGs in portfolio projects to `schedule=None`. Only set a real cron schedule when there's a real ops cadence requirement. Document the choice explicitly in the DAG docstring so a future reader sees the intent immediately.
+
+### 2026-05-22 — Airflow pause-mid-run trap: paused DAGs strand tasks in "scheduled" state
+
+Surfaced during Phase 5 session 5.9 end-to-end smoke test. After triggering a manual DagRun (smoke_test_5_9_2014_03_24) on a paused DAG via "Trigger DAG w/ config", the first task `extract_one_day` ran to completion (green). The second task `verify_one_day` then transitioned to `scheduled` state and **stayed there for 12+ minutes** — well outside the normal 5-30 second scheduled→queued transition window. The third and fourth tasks never started.
+
+**Root cause**: in Airflow 2.x the scheduler only evaluates tasks for DAGs whose `is_paused` flag is False. Tasks already in `running` or `queued` state when a DAG is paused will continue to run to completion (which is why `extract_one_day` finished green — it was already queued before the pause). But tasks that need to transition from `scheduled` → `queued` after the pause **get stranded**: the state-machine creates the `scheduled` task instance based on dependency satisfaction (upstream tasks succeeded), but the scheduler refuses to push `scheduled` → `queued` because the DAG is paused. The run is alive, the dependency is satisfied, the task is sitting there waiting — but no worker will ever pick it up until the DAG is unpaused.
+
+**The asymmetric pause behavior**:
+
+- Already-queued / already-running tasks: continue to completion ✓
+- Tasks that need to be queued after the pause: stranded forever ✗
+
+This is documented Airflow behavior, not a bug. See [Airflow Issue #15439](https://github.com/apache/airflow/issues/15439) — "DAG run state not updated while DAG is paused" — and the related discussion in [#55675](https://github.com/apache/airflow/issues/55675).
+
+**The fix when this happens**: unpause the DAG. The scheduler will pick up the stranded task within ~30 seconds and the rest of the chain proceeds normally.
+
+**The discipline rule to avoid this entirely**:
+
+- **NEVER pause a DAG mid-run if you want the run to complete.** Pausing is for "stop creating new DagRuns", not for "freeze the current run". The pause toggle is a scheduler-control, not a run-control.
+- **If you only want a one-off run, the safe sequence is: (1) unpause if necessary, (2) trigger the DagRun, (3) let it run to completion, (4) THEN pause.** Reversing steps 3 and 4 strands the chain.
+- **For genuinely paused-by-default DAGs, use `schedule=None`** (see prior LEARNING) so unpausing doesn't auto-create phantom runs and the pause/unpause cycle becomes much less load-bearing.
+
+**The asymmetric trap also has implications for the "Unpause DAG when triggered" toggle** in the "Trigger DAG w/ config" dialog. The toggle's label suggests it controls whether the DAG gets unpaused on trigger, but its effective semantics interact with the asymmetric pause behavior in non-obvious ways. In 5.9 we observed that even with the toggle set off (visually grey), the DAG ended up unpaused after trigger — possibly an Airflow 2.10.3 behavior where manual triggers always unpause regardless of toggle state. Safest practice: don't rely on the toggle for pause-control; instead, manually pause AFTER the run completes if you want the DAG paused.
+
+**Carry-forward for Project #3**: when designing orchestration DAGs, document the pause-mid-run trap in the DAG docstring or in the project's orchestration runbook. New analysts pairing on the project will hit this if they pause a DAG before its current run completes, and the symptom (task stuck on "scheduled" indefinitely) looks like a worker failure or a scheduler hang rather than a pause-state issue.
+
+### 2026-05-22 — Stale variable references in surgically-modified functions: scan return strings + log calls when removing a check
+
+Surfaced during Phase 5 session 5.9 smoke test. In Phase 5.4 the `verify_dbt_one_day` task in `airflow/dags/m5_daily_extract.py` was modified to remove the mart-layer check (the legacy `MART_EXECUTIVE_OVERVIEW` was renamed to `AGG_SALES_DAILY` with a different key schema; the per-run mart row-count check became redundant because `fact_daily_sales` already validates the incremental MERGE). The check itself was removed cleanly from the SQL query, the binds, the unpack, the log calls, the failure-check block — **but the success-path return statement still contained `f"fact={fact_rows}, mart={mart_rows}"`**, where `mart_rows` was no longer defined. The bug sat undiscovered for ~6 sessions because:
+
+- The 5.4 backfill ran with a feature-flag path that didn't reach this code,
+- Subsequent runs all failed earlier in the chain on unrelated issues (Snowflake transients, schema drift), masking the bug,
+- No CI / unit tests on Airflow task functions to catch the NameError statically.
+
+The bug fired on the 5.9 smoke test as the first run that actually reached the success path of `verify_dbt_one_day` since the 5.4 modification. Symptom: extract green, verify_one_day green, dbt_models all green, verify_dbt_one_day **red** with `NameError: name 'mart_rows' is not defined`.
+
+**The discipline rule**: when surgically removing a check or a variable from inside a function, scan for ALL references to the removed name in the rest of the function body — not just the obvious ones. Specifically:
+
+1. The SQL query itself (obvious).
+2. The bind tuple passed to `cur.execute()` (often forgotten).
+3. The unpacking line that destructures the row (often forgotten).
+4. **The log calls — `log.info(...)` lines that include the removed variable in their format args** (often forgotten because log statements look like side-effects, not code paths).
+5. **The success-path return string — f-strings or `.format()` calls that include the removed variable** (the 5.9 bug — easiest to miss because the return is at the bottom of the function, far from the check-block where the variable was used).
+6. The failure-check block — any `if x <= 0: failures.append(...)` lines (obvious, usually caught).
+
+**Why the success-path return is the easy-to-miss case**: when checks fail, the function raises before reaching the return. When checks pass, the return executes and the NameError fires. So the bug only surfaces on the happy path — exactly the path that hasn't been exercised since the modification, exactly the path you'd assume is "obviously working" because the data layer is healthy.
+
+**Defense-in-depth practices to catch this earlier**:
+
+- **Static analysis**: a `ruff` or `flake8` lint pass with `F821 undefined-name` enabled would catch this in <1 second. Worth adding to the project's CI as a pre-merge gate.
+- **`mypy --strict` or similar type-checking**: would also catch undefined references, plus catch type-mismatch bugs.
+- **End-to-end smoke tests as a phase-close gate**: the 5.9 smoke test is exactly how this bug was found. Every phase that modifies an Airflow DAG should close with one fresh end-to-end DagRun, not just unit tests of individual task functions.
+- **Code review checklist item**: "when removing a variable or a check, search the whole function body for references to the removed name before merging".
+
+**Carry-forward for Project #3**: add `ruff` (or equivalent) to the CI pipeline with `F821` enabled, as a pre-merge gate on any `*.py` file in `airflow/dags/`. Also bake the end-to-end smoke test as a phase-close ritual — the cheapest, highest-signal validation step at the end of each phase.
+
 ### Power BI (advanced from Project #1)
 
 ### 2026-05-18 — Explicit DAX measures over implicit aggregations

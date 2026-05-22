@@ -7,9 +7,17 @@ Snowflake -- the "simulated freshness via date-partitioned extraction"
 pattern locked in PROJECT_CONTEXT.md.
 
 DAG anatomy at a glance:
-    schedule:          @daily
-    start_date:        2014-01-01  (the day after the 3-year backfill ends)
-    catchup:           False       (don't auto-backfill 2.5 years on first start)
+    schedule:          None        (manual-trigger-only; portfolio-demo DAG --
+                                    no auto-firing on unpause. To run a date,
+                                    "Trigger DAG w/ config" and set logical
+                                    date. Locked 2026-05-22 in session 5.9
+                                    after the @daily schedule auto-triggered
+                                    a today's-date run on unpause.)
+    start_date:        2014-01-01  (the day after the 3-year backfill ends;
+                                    retained for run-history continuity)
+    catchup:           False       (redundant with schedule=None but kept
+                                    explicit so the no-backfill intent reads
+                                    clearly from the DAG body)
     retries:           2           (Airflow-level backstop; script-level
                                     retry-on-40613 handles the common case)
     retry_delay:       60s
@@ -104,7 +112,14 @@ execution_config = ExecutionConfig(
     # Pendulum DateTime for start_date is Airflow's recommended pattern --
     # explicit timezone, no naive-datetime warnings.
     start_date=pendulum.datetime(2014, 1, 1, tz="Australia/Melbourne"),
-    schedule="@daily",
+    # schedule=None makes this a manual-trigger-only DAG: unpausing it never
+    # auto-creates a DagRun. The only way to run is "Trigger DAG w/ config"
+    # with an explicit logical date. Locked 2026-05-22 in session 5.9 after
+    # an @daily schedule auto-triggered a today's-date run on unpause -- the
+    # extract then tried to pull 2026-05-22 from Azure SQL, which has no
+    # data past 2016, and failed. For a portfolio-demo DAG that should only
+    # ever run on operator command, schedule=None is the correct pattern.
+    schedule=None,
     catchup=False,
     max_active_runs=1,
     default_args=DEFAULT_ARGS,
@@ -376,7 +391,7 @@ def m5_daily_extract():
             f"stg(cal={stg_cal}, sp={stg_sp}, sales={stg_sales}), "
             f"int={int_rows}, "
             f"dim(cal={dim_cal}, item={dim_item}, store={dim_store}), "
-            f"fact={fact_rows}, mart={mart_rows}"
+            f"fact={fact_rows}"
         )
 
     # Cosmos generates one Airflow task per dbt model + one per dbt test,
