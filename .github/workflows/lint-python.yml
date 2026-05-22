@@ -1,0 +1,41 @@
+# =============================================================================
+# Python lint — undefined-name catcher (ruff F821)
+# =============================================================================
+# Defense-in-depth gate for stale variable references in surgically-modified
+# functions. Added 2026-05-22 after the Phase 5 session 5.9 `mart_rows`
+# NameError incident: a variable removed from a function in 5.4 left a dangling
+# reference in the success-path return f-string that sat undiscovered for 6
+# sessions because the success path hadn't been exercised. F821 catches this
+# class of bug at PR time, not at runtime.
+#
+# Scope: F821 only (undefined-name). Not full ruff — the project's existing
+# Python is not lint-clean against the default ruleset, and gold-plating
+# every style rule isn't the point. F821 is the one rule that would have
+# caught the real bug; that's the bar.
+# =============================================================================
+
+name: Python lint (F821)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ruff-f821:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff F821 (undefined-name)
+        run: ruff check --select F821 .

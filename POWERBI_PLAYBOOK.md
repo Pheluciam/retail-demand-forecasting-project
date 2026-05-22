@@ -293,45 +293,44 @@ These are operational rules that must be followed in every Phase 5 session.
 
 ---
 
-## 6. Clean rebuild checklist (Phase 5.3 onwards)
+## 6. Clean rebuild checklist (Phase 5.3 onwards) — COMPLETE at v1.0 ship
 
-Do these in order. Don't skip steps.
+> **Status 2026-05-22**: Phase 5/6 closed. This checklist served its purpose during the 5.3-5.4 architectural rebuild (lean-marts → composite → UDA detour → all-Import) and the 5.4-5.8 forecast layer + page builds. All items now checked. Retained as historical reference + Project #3 carry-forward template.
 
 **Phase A — dbt rebuild (out of PBI).**
 
 - [x] Step 1: Rename `mart_executive_overview` → `agg_sales_daily`, add `date_key`. *(done 2026-05-19)*
 - [x] Step 2: Build `agg_sales_daily_item_cat` mart. *(done 2026-05-19)*
 - [x] Step 3a: Build `int_forecast_input` view. *(done 2026-05-19)*
-- [ ] Step 3b: Run `sql/snowflake/05_train_forecast_model.sql` in Snowsight (~3-5 min). Verify smoke test: ~85K forecast rows, ~3K series, dates 2014-03-23 → 2014-04-19.
-- [ ] Step 3c: `dbt build --select fact_forecast_daily` — conforms keys + adds revenue forecast.
-- [ ] Step 3d: `dbt build --select mart_forecast_vs_actual` — UNION of actuals + forecast.
-- [ ] Step 4: `dbt build` full project — verify PASS=all green.
+- [x] Step 3b: Run `sql/snowflake/05_train_forecast_model.sql` in Snowsight. Smoke test verified ~85K forecast rows, ~3K series, dates 2014-03-23 → 2014-04-19. *(done 2026-05-20)*
+- [x] Step 3c: `dbt build --select fact_forecast_daily` — keys conformed + revenue forecast added. *(done 2026-05-20)*
+- [x] Step 3d: `dbt build --select mart_forecast_vs_actual` — UNION of actuals + forecast. *(done 2026-05-20)*
+- [x] Step 4: `dbt build` full project — all PASS. *(done 2026-05-20)*
 
 **Phase B — Snowflake verification SQL.**
 
-- [ ] Write `sql/verify/10_phase5_forecast_layer_verification.sql` (5-section PASS/FAIL on forecast input, raw output, fact, mart).
-- [ ] Run section-by-section in Snowsight; all PASS.
+- [x] Wrote `sql/verify/10_phase5_forecast_layer_verification.sql` (5-section PASS/FAIL on forecast input, raw output, fact, mart). *(done 2026-05-20)*
+- [x] Ran section-by-section in Snowsight; all PASS. *(done 2026-05-20)*
 
 **Phase C — Power BI semantic model rebuild.**
 
-- [ ] Open `retail_demand_forecasting.pbix`.
-- [ ] Delete all 5 currently-loaded tables (DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, MART_EXECUTIVE_OVERVIEW). Pages + slicers + visuals stay (will rebind when measures exist).
-- [ ] Get Data → Snowflake → connect with POWERBI_READER role. Choose Import mode for ALL tables.
-- [ ] Select: DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, FACT_FORECAST_DAILY, MART_FORECAST_VS_ACTUAL. *(Updated 2026-05-20 per §1.4 — original list included AGG_SALES_DAILY and AGG_SALES_DAILY_ITEM_CAT; UDA path abandoned, agg tables retained in dbt+Snowflake only.)*
-- [ ] In Power Query, on `FACT_DAILY_SALES`: drop `sale_key`, `date_key` columns (pruning for size). Optionally drop `sell_price` if size needs trimming.
-- [ ] Apply / Load.
-- [ ] Verify .pbix file size < 100 MB.
-- [ ] Manage Relationships: build 7 relationships (see §1.1 table; fact dims → 3 dims, forecast fact dims → 3 dims minus dim_calendar, mart dims → item + calendar).
-- [ ] Mark `DIM_CALENDAR` as Date Table on `calendar_date`.
-- [ ] Create `_Measures` table (Modeling → New table → `_Measures = ROW("Placeholder", BLANK())`). Hide Placeholder column.
-- [ ] Recreate all measures from §2 on `_Measures`.
-- [ ] ~~Manage Aggregations: register `AGG_SALES_DAILY` and `AGG_SALES_DAILY_ITEM_CAT`.~~ *(SUPERSEDED 2026-05-20 per §1.4 — UDA architecturally incompatible with all-Import storage; step skipped.)*
-- [ ] Hide: FACT_DAILY_SALES, FACT_FORECAST_DAILY. *(Updated 2026-05-20 — AGG_SALES_DAILY and AGG_SALES_DAILY_ITEM_CAT no longer loaded into the PBI model, so no Hide step needed for them.)*
-- [ ] Verify Executive Overview page renders correctly with the new measures.
+- [x] Opened `retail_demand_forecasting.pbix`. *(done 2026-05-20)*
+- [x] Deleted previously-loaded tables; pages + slicers + visuals retained. *(done 2026-05-20)*
+- [x] Get Data → Snowflake → connected with POWERBI_READER role; Import mode for all tables. *(done 2026-05-20)*
+- [x] Loaded 6 tables: DIM_CALENDAR, DIM_ITEM, DIM_STORE, FACT_DAILY_SALES, FACT_FORECAST_DAILY, MART_FORECAST_VS_ACTUAL. *(done 2026-05-20)*
+- [x] Power Query: pruned `FACT_DAILY_SALES` columns at load (dropped staging-era passthrough columns + raw event flags). *(done 2026-05-20)*
+- [x] Apply / Load completed; `.pbix` size verified within manageable range for repo. *(done 2026-05-20)*
+- [x] Manage Relationships: 5 relationships built (fact → 3 dims; mart → 2 dims). *(done 2026-05-20)*
+- [x] DIM_CALENDAR marked as Date Table on `calendar_date`. *(done 2026-05-20)*
+- [x] `_Measures` hidden table created; Placeholder column hidden. *(done 2026-05-20)*
+- [x] Measures recreated on `_Measures`. Final count: 16 measures at 5.8 close. *(done across 5.4-5.6)*
+- [x] ~~Manage Aggregations~~ — SUPERSEDED per §1.4; UDA architecturally incompatible with all-Import.
+- [x] FACT_DAILY_SALES, FACT_FORECAST_DAILY hidden in model view. *(done 2026-05-20)*
+- [x] Executive Overview verified rendering correctly with the new measures. *(done 2026-05-20)*
 
 **Phase D — Page builds.**
 
-- [ ] Execute §3.1-§3.5 in order. Each page uses the §2 measures.
+- [x] Executed §3.1-§3.5 in order across sessions 5.4-5.6. Each page uses §2 measures. *(done 2026-05-19 → 2026-05-21)*
 
 **Phase E — Polish + commit.**
 
@@ -343,8 +342,9 @@ Do these in order. Don't skip steps.
 - [x] VertiPaq Analyzer check on dims — DAX Studio installed (per-user path, External Tools ribbon registration didn't take, but standalone launch from Start Menu → Connect dialog → Power BI / SSDT Model radio works). View Metrics run; .vpax exported to `powerbi/retail_demand_forecasting.vpax`. Total model size ~254 MB compressed; FACT_DAILY_SALES dominant at 67%; forecast layer 25%; dims compact. *(done 2026-05-22 session 5.8)*
 - [x] Delete unused measures — 4 speculative time-intel measures deleted (Revenue PY, Revenue YoY $, Revenue YoY %, Revenue YTD; all created for YoY indicator + YTD pill patterns that were skipped due to new Card visual Reference labels variant issue). Final count: 16 measures on _Measures. *(done 2026-05-22 session 5.8)*
 - [x] Power Query consolidation (bonus 5.8 cleanup) — MART_FORECAST_VS_ACTUAL.SERIES_TYPE casing fix consolidated from 2 Replace Values steps to 1 Capitalize Each Word step using Text.Proper. Cleaner M code. *(done 2026-05-22 session 5.8)*
-- [ ] End-to-end DAG smoke test (single date, fresh) — DEFERRED to 5.9, then Phase 6 close.
-- [x] Phase-boundary bundled commit + push — 5.8 documentation updated mid-session (LEARNINGS / PROJECT_CONTEXT / PROJECT_PLAN / this playbook all bumped). 5.8 commits the polished .pbix + .vpax export + all docs at session close. *(done 2026-05-22 session 5.8)*
+- [x] End-to-end DAG smoke test — executed at 5.9 close for 2 fresh dates (2014-03-24 + 2014-03-25), all 4 tasks green after a mart_rows NameError fix + schedule=None DAG architectural change. *(done 2026-05-22 session 5.9)*
+- [x] Phase-boundary bundled commit + push — 5.8 + 5.9 + Phase 6 closeout commits shipped. *(done 2026-05-22)*
+- [x] **Phase 6 — README screenshots + POWERBI_PIPELINE.md walkthrough + future-revival paragraph + CI workflows (ruff F821 + dbt parse + sqlfluff) + v1.0 tag.** All shipped at Phase 6 close. *(done 2026-05-22)*
 
 **Locked design language for this project (referenced from 5.8 closeout):**
 

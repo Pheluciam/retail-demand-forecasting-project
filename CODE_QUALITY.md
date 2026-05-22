@@ -209,6 +209,51 @@ Both were 30-second fixes once caught. The cost of catching them
 post-commit would have been a rebase or a follow-up "fix" commit — more
 disruptive, worse history. The audit paid for itself on its first run.
 
+### Phase 6 audit (2026-05-22) — v1.0 ship gate
+
+Three new files shipped at Phase 6 close. Each passed all 10 criteria; results banked below for v1.0 release notes.
+
+**`.github/workflows/lint-python.yml`** — ruff F821 CI gate.
+
+- Currency: actions/checkout@v4 + actions/setup-python@v5 (latest stable as of May 2026); Python 3.11 baseline matches local venv.
+- Compactness: 30 lines; comments explain why F821-only scope is correct (full ruff is gold-plating).
+- Resource efficiency: lint runs in milliseconds; no Docker pull, no DB connection.
+- Privacy & security: no secrets needed, no credentials referenced.
+- Workflow consistency: kebab-case workflow filename matches the sibling dbt-ci.yml.
+- Dev environment hygiene: Python version pinned; pip install ruff without version pin is acceptable for a single-rule check.
+- Upstream/downstream contract: F821 catches exactly the class of bug surfaced at 5.9 (`mart_rows` stale variable reference). Defense-in-depth, not primary defence.
+- Idempotency: re-runs are safe; lint is read-only.
+- Pre-flight + post-action verification: the workflow IS the pre-flight verification step for every PR.
+- Observable progress + actionable errors: ruff outputs `file:line:col` for each finding, directly actionable.
+
+**`.github/workflows/dbt-ci.yml`** — dbt parse + sqlfluff lint.
+
+- Currency: dbt-core 1.11.10 + dbt-snowflake 1.11.5 pins match `requirements.txt` exactly; sqlfluff >=3.0.0 modern.
+- Compactness: two-job workflow; inline comment block explains why `dbt test` is deliberately excluded from CI (cost avoidance on pay-as-you-go Snowflake).
+- Resource efficiency: `paths:` filter limits runs to `dbt/**` changes — no wasted CI minutes on README-only commits.
+- Privacy & security: dummy env vars in the job (not real secrets); `dbt parse` doesn't connect to Snowflake.
+- Workflow consistency: matches sibling lint-python.yml style and conventions.
+- Dev environment hygiene: pins exactly match `requirements.txt`; `defaults.run.working-directory: dbt` removes path duplication.
+- Upstream/downstream contract: matches dbt-snowflake adapter version the project ships with.
+- Idempotency: re-runs safe.
+- Pre-flight + post-action verification: dbt parse catches Jinja / ref / source errors; sqlfluff catches SQL style drift.
+- Observable progress + actionable errors: both tools emit file:line errors with rule codes; failures point directly at the offending model.
+
+**`dbt/.sqlfluff`** — Snowflake-dialect lint config.
+
+- Currency: snowflake dialect + jinja templater are sqlfluff's current canonical names; `apply_dbt_builtins = true` enables `ref()` / `source()` / `var()` macro recognition.
+- Compactness: 30 lines; every section commented; each rule exclusion individually rationalised inline.
+- Resource efficiency: no DB connection required for lint; runs entirely on local templating.
+- Privacy & security: no secrets in config; no credentials referenced.
+- Workflow consistency: keyword case `upper` matches Phil's explicit SQL preference from TEACHING_PREFERENCES.md; identifier case `lower` matches dbt model source code; type/function/literal cases match conventional Snowflake style.
+- Dev environment hygiene: 120-char line length accommodates typical dbt-generated SQL without forcing artificial wrapping.
+- Upstream/downstream contract: dialect matches what the dbt project actually emits.
+- Idempotency: configuration is declarative; same input → same output every run.
+- Pre-flight + post-action verification: this config IS the gate sqlfluff uses for lint verification.
+- Observable progress + actionable errors: rule exclusions documented explain WHY each is off, so future engineers can re-enable confidently.
+
+**No findings to fix.** The Phase 4 audit caught 2 issues; this Phase 6 audit caught 0. Different file class — Phase 4 was author-time SQL + Python scripts where ordering / placeholder management could drift; Phase 6 is single-purpose CI declarations where the entire surface is small and reviewable in one pass. Net: 10-criteria checklist proven applicable across both file classes.
+
 ---
 
 ## Why this checklist exists
@@ -224,4 +269,4 @@ The structure of this project is deliberately documentation-heavy in support of 
 
 ---
 
-*Last updated: 2026-05-16 (Phase 4 session 4 — added "Phase-boundary structural audit" section; first applied in this session and caught two real findings). Prior milestone: 2026-05-14 (Phase 3 session 1 — added criterion 6, Dev environment hygiene). First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*
+*Last updated: 2026-05-22 (Phase 6 close — v1.0 ship audit appended; 3 new CI files passed all 10 criteria, 0 findings). Prior milestones: 2026-05-16 (Phase 4 session 4 — added "Phase-boundary structural audit" section; first applied in this session and caught two real findings); 2026-05-14 (Phase 3 session 1 — added criterion 6, Dev environment hygiene). First applied to Phase 1 deliverables: `smoke_test_azure_sql.py`, `01_create_raw_tables.sql`, `create_raw_tables.py`.*

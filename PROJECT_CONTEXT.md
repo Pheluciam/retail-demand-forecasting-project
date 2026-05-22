@@ -1,76 +1,70 @@
 # PROJECT_CONTEXT.md — Retail Demand & Forecasting Pipeline
 
-> Live state of the project. Read this at the start of every Cowork session,
+> Project history + live state. Read this at the start of every Cowork session,
 > alongside `TEACHING_PREFERENCES.md`.
-> Last updated: 2026-05-22 (Phase 5 session 5.9 closed — Phase 5 COMPLETE. End-to-end DAG smoke test executed across 2 fresh dates (2014-03-24 and 2014-03-25), all 4 tasks green after a mid-session debug loop that surfaced and fixed two real bugs: (a) `mart_rows` NameError in verify_dbt_one_day's success-path return f-string — stale variable reference left behind from the 5.4 mart-check surgical removal; (b) DAG architectural fix `schedule="@daily"` → `schedule=None` to stop unpause-time auto-creation of phantom DagRuns for today's date. 3 new Airflow LEARNINGS banked (schedule=None for portfolio-demo DAGs; pause-mid-run trap with stranded "scheduled" tasks; scan-all-references discipline when surgically modifying functions). POWERBI_PLAYBOOK.md scrubbed of stale UDA references (3 surgical edits to §1.1 storage-mode table and §6 Phase C checklist). PBI sanity verification: Home → Refresh, Data view → FACT_DAILY_SALES descending sort confirmed top row Tuesday 25 March 2014. Phantom 2026-05-22 DagRun retained in run history for portfolio narrative. Next: Phase 6 — README screenshots of all 5 PBI pages + POWERBI_PIPELINE.md walkthrough fill-in for sessions 5.2-5.8 + final commit/tag v1.0. Earlier 5.8 closeout summary follows: Phase 5 session 5.8 closed — Seasonality & Calendar and Forecast vs Actual pages polished end-to-end completing the 5-page interview-grade build (Seasonality: titles renamed, Day Type calc column on DIM_CALENDAR for readable Weekday/Weekend X-axis labels, Holiday bars top-N filter with $-formatted labels, heatmap matrix with green sequential gradient + Grow to fit column distribution + Don't format blank handling killing 2014 partial-year red distortion; Forecast vs Actual: Forecast Units companion KPI card, dashed/dotted styling on Forecast / Upper 95 / Lower 95 series, in-visual last-90-days filter zooming forecast horizon, matrix with Power Query Replace Values renaming actual/forecast → Actual/Forecast + "(Mart)" suffix dropped via Rename for this visual + Row padding bumped). Drill-through attempted: Item Detail destination page created and wired with DIM_ITEM[ITEM_ID] correctly per every documented spec, but right-click trigger did not fire in user's stock free PBI Desktop variant; Item Detail page DELETED, drill-through PULLED from 5.8 scope. Theme cohesion verified across 5 pages — City Park applied uniformly, design language locked (cat_id blue/purple/green, warm red callout, grey baseline, green sequential heat). VertiPaq Analyzer: DAX Studio installed but External Tools ribbon registration didn't take ("Install for me only" places pbitool.json in wrong scanned path); deferred to a session with "Install for all users". 6 new durable LEARNINGS banked (matrix Row padding lives in Grid → Options not Row headers; matrix Grow to fit lives in Layout → Column width section + Custom widths must be Off; build order discipline: pick theme + test drill-through EARLY with 1-2 visuals; drill-through trigger failure unresolved + pulled; cyclic ref two-cause refinement to 5.5 LEARNING — spurious cache vs real M-code self-reference; Power Query Replace Values is only stock-Desktop path for categorical value renames). 1 cyclic ref incident resolved via 5.5 close+reopen pattern after Power Query Replace Values transaction completed. .pbix saved at 5.8 close with 5 polished pages, 22 measures + 3 calc columns + 1 query transformation on _Measures/DIM_CALENDAR/MART_FORECAST_VS_ACTUAL).
+> Last updated: 2026-05-22 (Phase 6 closed — v1.0 SHIPPED).
 
 ---
 
-> **🎯 PHASE 6 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
+> **🎯 PROJECT STATUS — v1.0 SHIPPED 2026-05-22.**
 >
-> Phase 5 closed at session 5.9. The data layer (Azure SQL → Snowflake → dbt → marts) and the BI layer (5-page interview-grade Power BI dashboard with consistent theme, polish, and design language) are both complete. Pipeline smoke-tested end-to-end on 2026-05-22 with 2 fresh date runs (2014-03-24, 2014-03-25), all 4 tasks green, schedule=None DAG fix shipped, mart_rows NameError fix shipped. Phase 6 is documentation + ship — no more build, no more polish.
+> All six phases complete. End-to-end pipeline operational: Azure SQL → Snowflake `RAW` → dbt `STAGING` / `INTERMEDIATE` / `WAREHOUSE` / `MARTS` → Snowflake Cortex ML forecast → 5-page Power BI dashboard. Pipeline smoke-tested across 2 fresh dates at 5.9 close, all 4 tasks green end-to-end. Documentation + ship pass closed at Phase 6: README has 5 page screenshots + future-revival paragraph; POWERBI_PIPELINE.md is a 326-line walkthrough matching EXTRACT_PIPELINE / DBT_PIPELINE depth; CI workflows shipped (ruff F821 + dbt parse + sqlfluff). v1.0 git tag at Phase 6 close.
 >
-> **Phase 6 scope (estimated 2-3 sessions):**
+> **Carry-forward to Project #3 (Data Vault / streaming) — the rules and patterns that earned their keep across Phase 5-6:**
 >
-> 1. **README screenshots of all 5 PBI pages.** Open .pbix → screenshot each page individually with a clean Date slicer state → insert into README with caption text explaining what each page surfaces and why. Goal: a portfolio visitor (recruiter, hiring manager) can scan the README and understand the BI deliverable without opening the .pbix.
-> 2. **POWERBI_PIPELINE.md walkthrough fill-in for sessions 5.2-5.8.** The doc exists as a stub. Fill it to match the depth of EXTRACT_PIPELINE.md and DBT_PIPELINE.md: architectural decisions (all-Import, lean marts pattern, no UDA, _Measures table convention), measure inventory + DAX patterns, page-by-page build notes, polish discipline rules captured across 5.4-5.8, the 6+7 LEARNINGS surfaced during the PBI build.
-> 3. **README "Future-revival for interview demo" section.** Short paragraph explaining: the .pbix is Import-mode so the dashboard runs standalone (data baked into the file) — for portfolio visitors, just opening the .pbix demos everything. If a live refresh demo is needed 30+ days out (after Snowflake trial expiry), pay-as-you-go on Snowflake Standard tier for ~$5 the week before. Future-Phil reading this in 2-3 years has the demo-revival path clearly documented.
-> 4. **Optional Phase 6 stretch items** — VertiPaq Analyzer dim-cardinality check (carry from 5.9, needs DAX Studio reinstall as all-users OR standalone launch via Start Menu → Connect dialog → Power BI/SSDT Model radio), `ruff F821` undefined-name lint as CI pre-merge gate (defense-in-depth from 5.9 mart_rows LEARNING), GitHub Actions CI for dbt parse + dbt test + sqlfluff (originally stretch goal from Phase 0, now upgradeable to ship-grade given how much else has landed at quality).
-> 5. **Final commit + tag `v1.0`** at Phase 6 close. Public repo confirmation.
+> - 1-2 steps per response on UI walkthroughs, no walls of text
+> - Code blocks for paste-able only; plain text for read-not-copy
+> - PowerShell: one command per code block
+> - Airflow `schedule=None` for portfolio-demo DAGs (no auto-fire on unpause)
+> - NEVER pause an Airflow DAG mid-run (sequence: unpause → trigger → complete → pause)
+> - Scan ALL references when surgically removing a variable (success-path return f-strings are the easy-miss case)
+> - PBI all-Import storage mode; measures live on `_Measures` hidden table; never aggregate raw mart columns from a fact-keyed measure
+> - Snowflake unquoted identifiers stored as UPPERCASE — DAX must match catalog case
+> - When 3 things look broken at once, suspect ONE root cause; try the cheapest single-variable fix first
+> - PBI diagnostic order: Pause Visuals first, then close+reopen for cyclic refs, then trace the model
+> - Transformation layer hierarchy: dbt → Power Query → DAX → visual (cleanup at lowest possible layer)
+> - Feature-detect on screenshots before prescribing PBI UI clicks — variant differences matter
+> - Default to "most professional"; lean teaching-heavy in conversation, ship clean code in commit
 >
-> **Hard discipline reminders — carry forward from 5.4-5.9:**
->
-> - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC** when symptoms include "things blank on click" / "needs refresh" / "slicer empty even though data exists".
-> - **Cyclic reference errors — TWO causes, two diagnostic orders.** (a) Spurious cache desync → save + close + reopen clears instantly. (b) Real Power Query M-code self-reference → open PQ Editor, inspect each Applied Step's first argument, must be `#"PreviousStep"` not the query name itself.
-> - **Calculated COLUMN vs MEASURE** distinction (formula bar identical, evaluation context different).
-> - **Snowflake unquoted identifiers → UPPERCASE in PBI catalog.**
-> - **PBI format pane control locations vary by variant** — pin EXACT paths from screenshot before prescribing.
-> - **Basic-license PBI Desktop variants may be missing optional new-visual features** — feature-detect on screenshot before prescribing.
-> - **Measure-level Format = Currency** propagates everywhere the measure is used.
-> - **Manage Aggregations is OFF the table** for this model (all-Import architecturally incompatible).
-> - **dim_calendar extends 60 days past max historical date** (FACT_DAILY_SALES max as of 5.9 close: 2014-03-25).
-> - **When 3 things look broken at once, suspect ONE root cause** and try the cheapest single-variable fix first.
-> - **PBI build order — theme + drill-through test EARLY, not at polish time.**
-> - **Transformation layer hierarchy: dbt → Power Query → DAX → visual.** Do cleanup at the lowest possible layer.
-> - **NEW IN 5.9 — Airflow `schedule=None` for portfolio-demo DAGs.** Unpausing should never auto-fire a DagRun. Only "Trigger DAG w/ config" creates runs.
-> - **NEW IN 5.9 — NEVER pause an Airflow DAG mid-run.** The scheduler strands tasks in "scheduled" state. Sequence: unpause → trigger → let it complete → THEN pause.
-> - **NEW IN 5.9 — when surgically removing a check/variable from a function, scan ALL references** (SQL, binds, unpack, log calls, success-path return f-strings, failure-check block). Success-path return strings are the easy-to-miss case.
-> - **Pacing locked**: 1-2 steps per response, code blocks only for paste-able, plain text for everything Phil READS not COPIES. PowerShell: one command per code block.
->
-> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched through 5.9) remains the locked source of truth for Power BI work. Phase 6 inherits this directive plus the 3 new 5.9 Airflow LEARNINGS banked in LEARNINGS.md.
+> Session opening directives from Phase 5 (5.8, 5.9) and Phase 6 have been retired — they were forward-looking instructions for sessions that have now closed. The session-by-session closeout blocks below remain as project history.
 
 ---
 
-> **🎯 SESSION 5.8 OPENING DIRECTIVE — READ FIRST AT SESSION OPEN.**
->
-> Session 5.7 shipped polish on Executive Overview, Demand by Hierarchy, and Promotion & Price (3 of 5 pages). All visuals on those pages now have category-keyed coloring, renamed titles, currency-formatted axes, and cross-page Date + Category slicer sync. Session 5.8 closes Phase 5 by finishing the remaining 2 pages, executing the drill-through + VertiPaq + DAG smoke-test backlog, and bundling the end-of-Phase commit:
->
-> 1. **Seasonality & Calendar — full polish pass.** Slicers already compacted by Phil during 5.7. Outstanding: weekday bar visual category-coloring + title renames; Year × Month heatmap matrix cosmetic polish (font scale, conditional-formatting color scale); Holiday bar formatting + title; theme cohesion check.
-> 2. **Forecast vs Actual — finish.** KPI card pair (Forecast Revenue card already added during 5.7; optional Forecast Units card duplicate at Horizontal 1000, Vertical 76 to mirror); line chart spacing + dashed/dotted styling on Forecast / Upper 95 / Lower 95 series; matrix cosmetic polish; theme cohesion.
-> 3. **Drill-through actions** — Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail. New hidden page receives item context, shows per-item detail.
-> 4. **Theme consistency check across all 5 pages** — City Park applied, verify it didn't snap any visuals back to default blues.
-> 5. **VertiPaq Analyzer** check on dim cardinalities — banks an interview talk-track artifact about model size + compression efficiency.
-> 6. **End-to-end DAG test run** before Phase 6 close — single date, fresh, to confirm extract → verify → dbt → verify_dbt still works after the 5.4 dim_calendar extension + forecast layer + 5.6 mart-source measure additions + 5.7 polish.
-> 7. **Delete unused measures** — Phil flagged at end of 5.6; do this near end of 5.8 once everything still uses what it's meant to use.
-> 8. **End-of-session bundled commit + push** + PROJECT_CONTEXT.md / PROJECT_PLAN.md / LEARNINGS.md / POWERBI_PLAYBOOK.md 5.8 closeout updates.
->
-> **Hard discipline reminders — carry forward from 5.4-5.7:**
->
-> - **OPTIMIZE → PAUSE VISUALS IS THE FIRST DIAGNOSTIC** when symptoms include "things blank on click" / "needs refresh" / "slicer empty even though data exists". 1-click check, highest-signal PBI diagnostic.
-> - **Cyclic reference errors → save + close + reopen the .pbix FIRST** before tracing the model. Many PBI cyclic ref errors are spurious cache desync.
-> - **Calculated COLUMN vs MEASURE** is a real distinction — same formula bar, different evaluation context. "Cannot find name [column]" on a column you can SEE in the Data pane = you clicked New measure instead of New column.
-> - **Snowflake unquoted identifiers → UPPERCASE in PBI.** When writing DAX against Snowflake-imported tables, default to UPPERCASE column names or rely on Intellisense.
-> - **PBI format pane section names vary by visual type.** Bars (horizontal bar) vs Columns (vertical column) vs Markers (scatter, with per-series Apply settings to dropdown) vs Slices (donut/pie). Don't assume a uniform "Colors" section — web-check the visual type before giving paths. (Locked 2026-05-21 in 5.7.)
-> - **Basic-license PBI Desktop variants may be missing optional new-visual field wells.** New Card visual's Reference labels field well is not universally present — feature-detect on screenshot before recommending YoY/PoP indicator patterns that rely on it. (Locked 2026-05-21 in 5.7.)
-> - **PBI measure formula commits require an explicit click on the green checkmark** when EDITING. Enter does not commit — it inserts a newline.
-> - **Measure-level Format = Currency** (Measure tools ribbon) propagates to ALL axis labels and tooltips everywhere the measure is used — set once, applies everywhere. Don't bother with per-visual axis decimal-place formatting if the measure already has a Currency format.
-> - **Scatter chart legend ordering** requires a Sort by column at field level (model-wide); the visual's ... menu does not expose a Sort axis option. Trade-off: alphabetical sort is usually fine — only invest in the model-level sort if the legend ordering matters for the polish story.
-> - **Manage Aggregations is OFF the table** for this model (all-Import architecturally incompatible with UDA's DirectQuery-detail-table requirement).
-> - **`dim_calendar` extends 60 days past the last historical date** (max = 2014-05-22). `Active Items` measure uses fact's `sale_date` not dim's `calendar_date` to avoid future-horizon empty-date trap.
-> - **When 3 things look broken at once, suspect ONE root cause** and try the cheapest single-variable fix first.
-> - **Pacing locked**: 1-2 steps per response, no walls of text, code blocks only for paste-able (DAX, file paths, command strings), plain text for everything Phil is meant to READ not COPY. PowerShell: one command per code block.
->
-> `POWERBI_PLAYBOOK.md` (revised 2026-05-19, patched 2026-05-20) remains the locked single source of truth. Polish work in 5.7-5.8 sits on top of the §3.1-§3.5 page specs delivered in 5.4-5.6.
+## Phase 6 closeout (2026-05-22)
+
+**Headline outcomes:**
+
+- **README Dashboard section populated end-to-end.** Five Power BI page screenshots captured at the 5.9 model state, saved to `powerbi/screenshots/` with lowercase-underscore filenames. Each embedded in README with a 1-2 sentence caption grounded in the visible screenshot content. One caption corrected mid-review when an initial draft claimed "Q4 seasonality" based on memory from the 5.6 closeout text; cross-checked against the actual Year × Month heatmap and found the data didn't support that claim (Oct-Dec values are not materially stronger than Mar-Jul for 2012/2013). Corrected to "year-on-year revenue growth (~50% lift from 2011 to 2013)" — accurate to the visual. Single-mistake protocol followed: flag the inaccuracy in chat, propose the fix, get OK, then apply. Forecast vs Actual screenshot re-snipped once because the Units chart had visible filter/expand chrome icons in its top-right corner (visual was selected when first snipped); deselected and re-saved cleanly.
+- **POWERBI_PIPELINE.md rewritten from 5.4 stub to 326-line walkthrough.** Matches EXTRACT_PIPELINE / DBT_PIPELINE depth. Sections: headnote with the 5.9 close framing; architecture position; Snowflake connection deep-dive with both 5.1 gotchas (schema visibility ≠ access boundary; credential desync); storage mode arc (full Import → composite at 949 MB push limit → UDA detour → all-Import lean final); 6-table semantic model with relationship table and `_Measures` hidden table convention; 3 calc columns + 1 Power Query `Text.Proper` transformation; the five pages with full visual / polish / insight breakdown per page; 16-measure DAX library grouped by domain (base / page-specific / forecast / time-intel); cross-page UX (sync slicers, theme, drill-through ATTEMPTED+PULLED); VertiPaq Analyzer results from the 5.8 .vpax export; 19 polish discipline rules across 5 categories (diagnostic-order / architecture / format-pane / build-order / data-correctness); Phase 6 capture snapshot; future revival for interview demo; cross-references to all sibling docs.
+- **README "Demo & future revival" paragraph added** between Dashboard and Key learnings. Tight ~2-paragraph summary pointing at POWERBI_PIPELINE.md for full detail. Covers: .pbix is Import-mode so opens standalone (data baked in); live refresh demo path is pay-as-you-go Snowflake Standard for one week the week before an interview (~$5 expected); end-to-end demo flow is trigger DAG → refresh PBI → show new row in Data view.
+- **CI workflows shipped — 2 of 3 stretch items.** `.github/workflows/lint-python.yml` runs `ruff check --select F821 .` on PR + push to main, defense-in-depth against the 5.9 `mart_rows` NameError class of bug. `.github/workflows/dbt-ci.yml` runs `dbt parse` (catches Jinja/ref/source errors, no DB connection needed) + `sqlfluff lint models/` (Snowflake-dialect SQL style check) on PR + push when `dbt/**` changes. `dbt test` deliberately excluded from CI to avoid burning pay-as-you-go Snowflake credits on every push; comment in the workflow explains the call. `dbt/.sqlfluff` config file pins the dialect to snowflake, templater to jinja (no DB connection required for lint), uppercase keywords matching Phil's SQL style preference, 120-char line length, 3 rule exclusions documented inline (LT05 line length, RF02 qualified references, ST05 subquery rewrites). Dummy env vars in dbt-ci.yml so dbt parse templates valid strings without needing real Snowflake creds.
+- **VertiPaq dim-cardinality stretch CUT.** `.vpax` files use ZIP64 archive format which Windows native `Expand-Archive` cannot read (errors with "Offset to Central Directory cannot be held in an Int64"). Could be worked around with 7-zip or `python -m zipfile`, but the value-vs-effort ratio doesn't justify the additional 20-30 minutes given the high-level VertiPaq stats from 5.8 are already documented in POWERBI_PIPELINE.md §11 (~254 MB compressed, FACT 67%, forecast 25%, ~5 bytes/row/col compression). The .vpax file itself ships with the repo so any future reviewer with DAX Studio can open it for the per-column drill-down. Honest "cut, don't gold-plate" decision.
+- **All 13 markdown files swept** for v1.0 close. PROJECT_PLAN.md Status block compressed from a 5-paragraph 5.9-and-earlier closeout into a tight Phase 6 close paragraph (duplicated history removed; lives in PROJECT_CONTEXT.md). PROJECT_CONTEXT.md header updated, retired Phase 6 + 5.8 opening directives, this closeout block prepended above 5.9 closeout. LEARNINGS.md, POWERBI_PLAYBOOK.md, LEARNING_ROADMAP.md, GLOSSARY.md, CODE_QUALITY.md, README.md Key learnings stub — all updated.
+
+**Files updated this session (Phase 6):**
+
+- `README.md` — Dashboard section populated with 5 PBI page screenshots + grounded captions; "Demo & future revival" section added between Dashboard and Key learnings; Key learnings stub populated.
+- `POWERBI_PIPELINE.md` — full rewrite from 214-line stale stub to 326-line v1.0 walkthrough. See headline outcomes for detail.
+- `PROJECT_PLAN.md` — Status block compressed to Phase 6 close summary; Next step set to "Project complete — begin Project #3".
+- `PROJECT_CONTEXT.md` — this file. Header bumped to Phase 6 closed / v1.0 SHIPPED; Phase 6 opening directive + 5.8 opening directive retired; v1.0 STATUS banner replaces them; this Phase 6 closeout block prepended above 5.9.
+- `LEARNINGS.md` — 2 new Phase 6 entries appended: (a) .vpax ZIP64 format incompatibility with Windows Expand-Archive (workaround paths documented); (b) ruff F821 as CI defense-in-depth pattern for stale-variable-reference bugs surfaced from the 5.9 mart_rows incident.
+- `POWERBI_PLAYBOOK.md` — Phase E status mark complete; trailing notes scrubbed of Phase-6-pending references.
+- `LEARNING_ROADMAP.md` — Phase 5 + Phase 6 marked complete; project marked v1.0 SHIPPED.
+- `GLOSSARY.md` — 4 new terms added (CI / GitHub Actions; ruff + F821; sqlfluff; .vpax + VertiPaq Analyzer).
+- `CODE_QUALITY.md` — Phase 6 audit results appended (3 new CI files all pass 10-criteria checklist).
+- `.github/workflows/lint-python.yml` — new, Python F821 lint CI.
+- `.github/workflows/dbt-ci.yml` — new, dbt parse + sqlfluff lint CI.
+- `dbt/.sqlfluff` — new, Snowflake-dialect lint config.
+- `powerbi/screenshots/executive_overview.png` — new (260 KB).
+- `powerbi/screenshots/demand_by_hierarchy.png` — new (111 KB).
+- `powerbi/screenshots/promotion_and_price.png` — new (72 KB).
+- `powerbi/screenshots/seasonality_and_calendar.png` — new (127 KB).
+- `powerbi/screenshots/forecast_vs_actual.png` — new (122 KB), one re-snip after deselecting chrome icons.
+
+**Pending / deferred to Project #3 (none for this project — v1.0 is complete):**
+
+- VertiPaq per-dim per-column cardinality drill-down (ZIP64 + DAX Studio install path issue; .vpax ships for any future reviewer with DAX Studio).
+- Reinstall DAX Studio as "Install for all users" for External Tools ribbon registration — only relevant if Phil returns to PBI work on this project.
 
 ---
 

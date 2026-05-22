@@ -13,8 +13,8 @@
 | Stage | Status | Notes |
 |---|---|---|
 | Project #1 — CDC NT Transport (dbt-first analytics project) | ✅ Done | Reference: `C:\dbt\cdc_nt_gtfs\` |
-| **Project #2 — Retail Demand & Forecasting Pipeline** (this repo) | 🏗 In progress — Phase 4 closed (Airflow + dbt via Cosmos), Phase 5 (Power BI) next | Headline: orchestration |
-| Project #3 — Financial markets pipeline (Databricks lakehouse + Data Vault 2.0) | 📋 Planned — stack locked 2026-05-19 | See "Project #3 — locked stack" section below |
+| **Project #2 — Retail Demand & Forecasting Pipeline** (this repo) | ✅ **v1.0 SHIPPED 2026-05-22** | All 6 phases complete: Azure SQL → Snowflake → dbt → Cortex ML forecast → 5-page Power BI dashboard. CI shipped (ruff F821 + dbt parse + sqlfluff). |
+| Project #3 — Financial markets pipeline (Databricks lakehouse + Data Vault 2.0) | 📋 Planned — stack locked 2026-05-19; ready to start | See "Project #3 — locked stack" section below |
 | **Post-Project #3 — 6-8 week DE training journey** | 📋 Planned — design locked 2026-05-19 | Broader than the original Python-only block. See below |
 | Subsequent projects | 🤔 TBD | Depends on job search outcome and direction |
 
@@ -156,3 +156,4 @@ Per Phil's own framing:
 - 2026-05-19 — Project #3 folder name locked as `financial-markets-pipeline-project` (under `C:\Users\Phil\Documents\Claude\Projects\`). Locked early to prevent mid-project rename — Project #2 had folder-rename connection breakage that we're not repeating.
 - 2026-05-19 — Post-Project #3 training journey design locked. Replaces the earlier Python-only block with a broader 6-8 week, code-first, quiz-warm-up program covering Python + YAML + Airflow DAG Python + SQL + dbt + modeling + Git/CLI/Docker. Hands-on with Phil's own project code. 80/20 code-to-concept split. Beginner → early intermediate target. Quiz progression: multiple choice → fill-in-blank → type-the-command across weeks 1-8. Cross-session memory via a quiz-log file. Tentative folder name `de-training-journey-project`. Four open decisions captured for Phase 0.
 - 2026-05-19 — Training journey tooling locked as Claude Code (not Cowork). Terminal-native workflow simulates real DE job conditions, quizzes work in-terminal, markdown persistence identical across tools. Cowork stays available for occasional admin/planning sessions.
+- 2026-05-22 — **Project #2 shipped as v1.0.** All 6 phases complete across 22 sessions. Azure SQL operational source + Snowflake analytical warehouse + Airflow + Cosmos + dbt + Snowflake Cortex ML forecast + 5-page Power BI dashboard. Carry-forward LEARNINGS banked for Project #3 across Snowflake, Airflow, dbt, Power BI, and CI domains (see `LEARNINGS.md`). Next: Project #3 Phase 0 setup (`financial-markets-pipeline-project`).

@@ -1575,6 +1575,47 @@ Source: [community.fabric.microsoft.com — External Tools Ribbon Missing](https
 
 **Carry-forward:** for Project #3, when installing external tools (Tabular Editor, DAX Studio, Bravo for Power BI, ALM Toolkit), default to "Install for all users" to ensure External Tools ribbon registration. Note this in Project #3's tooling setup checklist.
 
+### 2026-05-22 — .vpax files use ZIP64 format; Windows Expand-Archive cannot read them
+
+Surfaced during Phase 6 when trying to extract the VertiPaq Analyzer export (`powerbi/retail_demand_forecasting.vpax`, 76 KB) via PowerShell to populate per-dim cardinality stats into POWERBI_PIPELINE.md without reopening DAX Studio. Tried `Copy-Item .vpax .zip` then `Expand-Archive`. Failed with:
+
+```
+Exception calling ".ctor" with "3" argument(s):
+"Offset to Central Directory cannot be held in an Int64."
+```
+
+**Root cause:** .vpax files are ZIP archives using the **ZIP64 extension** (the format used when an archive or one of its entries exceeds 4GB or 65,535 files). DAX Studio writes .vpax in ZIP64 by default. Windows PowerShell's built-in `Expand-Archive` (built on `System.IO.Compression.ZipArchive`) does not implement ZIP64; the central-directory offset overflow throws on the constructor before any entries are read.
+
+**Three working workarounds:**
+
+1. **7-zip CLI**: `7z x retail_demand_forecasting.vpax -o<dest>` — handles ZIP64 transparently.
+2. **Python zipfile module**: `python -m zipfile -e retail_demand_forecasting.vpax <dest>` — also handles ZIP64.
+3. **DAX Studio itself**: File → Open VPAX in DAX Studio renders the contents natively (tables, columns, cardinality, size) without needing to extract the archive at all. This is the intended path; the extract-with-tools approach is a workaround.
+
+**Carry-forward:** for any future tooling that exports ZIP64 archives (some database backup files; some build artefacts > 4GB), do not assume `Expand-Archive` will read them. Default to `7z` or `python -m zipfile` for unknown archives. In this project, the .vpax ships with the repo so the reviewer-with-DAX-Studio path works without any extraction step.
+
+### 2026-05-22 — `ruff F821` as a CI pre-merge gate catches stale-variable-reference bugs
+
+Defense-in-depth pattern shipped at Phase 6 close after the 5.9 `mart_rows` NameError incident. The bug was a stale variable reference left in the success-path return f-string of `verify_dbt_one_day` after the 5.4 mart-check surgical removal; sat undiscovered for 6 sessions because the success-path code didn't fire during routine work, only during a full smoke test.
+
+**The CI gate** (`.github/workflows/lint-python.yml`):
+
+```yaml
+- name: Run ruff F821 (undefined-name)
+  run: ruff check --select F821 .
+```
+
+Runs on every pull request and every push to `main`. F821 is ruff's rule for undefined-name references — exactly the class of bug that bit us. The check is **scoped to F821 only**, not full ruff lint, because the codebase isn't lint-clean against the default ruleset and gold-plating every style rule isn't the point. F821 is the one rule that would have caught the actual bug.
+
+**Why this is defense-in-depth, not a primary defence:**
+
+- Manual testing (running the DAG end-to-end) would catch it — and did, eventually, in 5.9.
+- Code review by a second pair of eyes would catch it.
+- Type checkers (mypy, pyright) would catch it but they're a heavier lift to configure for an Airflow project.
+- F821 is the cheapest catch — milliseconds per CI run, no config, no false positives in this codebase.
+
+**Carry-forward:** for Project #3, add F821 to the CI pre-merge gates from day one. Cost ~5 minutes of setup; saves potentially hours of stale-reference debugging. If the project grows to need stricter Python quality bars, the same workflow file can expand the `--select` flag to broader rule sets without restructuring CI.
+
 ### Docker
 
 _(to be populated as encountered — containerisation patterns, docker-compose,
@@ -1582,7 +1623,13 @@ networking between containers)_
 
 ### Git / GitHub Actions
 
-_(to be populated as encountered — branching, PRs, CI workflows, sqlfluff lint)_
+**Project #2 v1.0 CI shipped 2026-05-22 (Phase 6 close):**
+
+- `.github/workflows/lint-python.yml` — ruff F821 undefined-name gate (see entry above).
+- `.github/workflows/dbt-ci.yml` — dbt parse + sqlfluff lint on PR + push when `dbt/**` changes. Dummy Snowflake env vars in the job env so `dbt parse` templates without needing real credentials; `dbt test` deliberately excluded with an inline comment explaining the cost-avoidance reasoning (would burn pay-as-you-go credits on every push, run locally before merging).
+- `dbt/.sqlfluff` — Snowflake dialect, jinja templater (no DB connection needed for CI), uppercase keywords, 120-char line length, 3 rule exclusions documented inline (LT05 / RF02 / ST05).
+
+**Carry-forward:** Project #3 starts with `.github/workflows/` already populated from this template. Add domain-specific tests on top of the F821 + dbt-parse + sqlfluff foundation.
 
 ---
 

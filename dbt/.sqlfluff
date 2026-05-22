@@ -1,0 +1,39 @@
+# =============================================================================
+# sqlfluff config — Snowflake dialect, dbt-templated
+# =============================================================================
+# Lint config for the dbt project. Runs locally via `sqlfluff lint .` and in
+# CI via .github/workflows/dbt-ci.yml. The `jinja` templater is used in CI
+# (no Snowflake connection required) to keep the lint check free of secrets;
+# locally, set templater = dbt for full ref()/source() resolution.
+# =============================================================================
+
+[sqlfluff]
+dialect = snowflake
+templater = jinja
+exclude_rules = LT05, RF02, ST05
+# LT05 — line length: relaxed because dbt-generated SQL often exceeds 80 chars
+# RF02 — qualified references: false-positives against dbt source()/ref() macros
+# ST05 — subquery rewrites: dbt CTE chains are intentional, not refactor candidates
+max_line_length = 120
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 4
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.types]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = upper
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = true

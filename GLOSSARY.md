@@ -1160,6 +1160,24 @@ A modelling-tab action that tells Power BI which table is your canonical date di
 
 **In this project:** `DIM_CALENDAR` is marked as Date Table on `calendar_date` (Phase 5 session 5.4). Auto Date/Time is disabled globally (carry-forward from Project #1).
 
+### **VertiPaq Analyzer**
+
+A Power BI / Analysis Services diagnostic tool — surfaces the in-memory model size, per-table compression efficiency, per-column cardinality, dictionary size, and encoding type. Ships inside DAX Studio (free, third-party). The single best tool for "how big is my model and what's dominating it?" questions, and for finding high-cardinality columns that VertiPaq's columnar engine can't compress efficiently.
+
+**In this project:** Run via DAX Studio at Phase 5 session 5.8 close. Captured: total compressed model ~254 MB; `FACT_DAILY_SALES` dominant at 67% (~170 MB); forecast layer 25% (~65 MB); dims + measures the rest. Exported to `powerbi/retail_demand_forecasting.vpax`. [Project 2]
+
+### **.vpax**
+
+The export format for VertiPaq Analyzer snapshots. A zip archive (using **ZIP64** extensions to support archives larger than 4 GB or 65,535 entries) containing XML / JSON metadata describing every table, column, relationship, and storage statistic in the model.
+
+**Gotcha**: Windows' built-in `Expand-Archive` does NOT support ZIP64; opening a .vpax with PowerShell native tools fails with "Offset to Central Directory cannot be held in an Int64." Workarounds: 7-zip, `python -m zipfile`, or just open the .vpax in DAX Studio directly (the intended path). See `LEARNINGS.md` → "2026-05-22 — .vpax files use ZIP64 format" for the full pattern.
+
+### **ZIP64**
+
+A 1996 extension to the original ZIP archive format that lifts the 4 GB / 65,535-entry limits of the original spec. Used by archives that need to be larger than 4 GB or that simply choose to write central-directory offsets as 64-bit integers regardless of size (DAX Studio's .vpax exports do this).
+
+**Why this matters:** Tools that pre-date ZIP64 or implement only the original spec will fail on these archives even when they're tiny (the .vpax in this project is 76 KB and still triggers the ZIP64 incompatibility). Windows PowerShell `Expand-Archive` is one such tool. 7-zip, Python `zipfile`, and most modern unzip tools handle ZIP64 transparently.
+
 ---
 
 ## 12. Testing & QA
@@ -1220,7 +1238,7 @@ Phil's project-specific code-review checklist (`CODE_QUALITY.md`) — seven core
 
 The discipline of running automated checks (build, lint, test) on every commit or PR, before code is merged. Catches regressions before they reach main.
 
-**In this project:** Stretch goal for Phase 6 — GitHub Actions running `dbt parse`, `dbt test`, `sqlfluff lint` on every push.
+**In this project:** Shipped at Phase 6 close — `.github/workflows/lint-python.yml` (ruff F821 undefined-name lint) + `.github/workflows/dbt-ci.yml` (dbt parse + sqlfluff lint). `dbt test` deliberately excluded from CI to avoid burning Snowflake pay-as-you-go credits on every push; run locally before merging.
 
 ### **CD** (Continuous Deployment / Continuous Delivery)
 
@@ -1236,9 +1254,21 @@ A tool that _rewrites_ code to enforce style automatically — Black for Python,
 
 ### **`sqlfluff`**
 
-A SQL linter and formatter that understands dbt. Run against `dbt/models/` to enforce CAPS keywords, consistent indentation, trailing commas. Configurable via `.sqlfluff` at the repo root.
+A SQL linter and formatter that understands dbt. Run against `dbt/models/` to enforce CAPS keywords, consistent indentation, trailing commas. Configurable via `.sqlfluff` at the repo root or inside the dbt project.
 
-**In this project:** Phase 6 stretch goal. Listed under code-quality audit as the one criterion deferred to closing.
+**In this project:** Shipped at Phase 6 close. Config lives at `dbt/.sqlfluff`: Snowflake dialect, jinja templater (no DB connection needed for CI), uppercase keywords matching Phil's SQL style preference, 120-char line length, 3 rule exclusions documented inline (LT05 / RF02 / ST05). Runs on PR + push via `.github/workflows/dbt-ci.yml`.
+
+### **`ruff`**
+
+A fast Python linter and formatter written in Rust — replaces flake8, isort, pyupgrade, and several other Python tools with a single binary. Lints in milliseconds even on large codebases.
+
+**In this project:** Shipped at Phase 6 close as a defense-in-depth gate, scoped to **rule F821 only** (undefined-name references). F821 catches the class of bug surfaced at 5.9 close — a stale variable reference in a function's success-path return f-string that survived a 5.4 surgical removal because the success path didn't fire during routine work. The full ruff ruleset isn't enforced (codebase isn't clean against the defaults; gold-plating isn't the point). Workflow: `.github/workflows/lint-python.yml`.
+
+### **F821**
+
+ruff's rule code for **undefined name** references — flagging a name used in source code that isn't defined in any visible scope (no `import`, no assignment, no function parameter). The Python equivalent of "Cannot find symbol" in compiled languages. Catches typos, deleted variables still referenced elsewhere, and stale references in surgically-modified functions.
+
+**In this project:** The one ruff rule enabled in CI — see the `ruff` entry above.
 
 ### **`pre-commit`**
 

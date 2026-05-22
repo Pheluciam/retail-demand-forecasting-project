@@ -1,0 +1,88 @@
+# =============================================================================
+# dbt CI — parse + sqlfluff lint
+# =============================================================================
+# Pre-merge quality gate for the dbt project. Two checks run without needing
+# Snowflake credentials:
+#
+#   1. `dbt parse` — compiles every model + macro, catches Jinja errors,
+#      missing ref()/source() targets, circular dependencies, schema test
+#      misconfigurations. No DB connection required (parse only).
+#
+#   2. `sqlfluff lint` — Snowflake-dialect SQL style check across models/
+#      using the dbt/.sqlfluff config. Catches keyword case violations,
+#      malformed CTEs, indentation drift.
+#
+# `dbt test` is NOT in CI because it requires a live Snowflake connection
+# (would burn pay-as-you-go credits on every push). Run dbt test locally
+# before merging — see DBT_PIPELINE.md.
+# =============================================================================
+
+name: dbt CI (parse + lint)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "dbt/**"
+      - ".github/workflows/dbt-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "dbt/**"
+      - ".github/workflows/dbt-ci.yml"
+
+jobs:
+  dbt-parse:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+    env:
+      # Dummy values — dbt parse doesn't connect to Snowflake but the profile
+      # still needs to template valid strings into the env_var() calls.
+      SNOWFLAKE_ACCOUNT: ci-dummy-account
+      SNOWFLAKE_USER: ci-dummy-user
+      SNOWFLAKE_PASSWORD: ci-dummy-password
+      SNOWFLAKE_ROLE: ci-dummy-role
+      SNOWFLAKE_WAREHOUSE: ci-dummy-warehouse
+      SNOWFLAKE_DATABASE: ci-dummy-database
+      SNOWFLAKE_SCHEMA: ci-dummy-schema
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt-snowflake (matches requirements.txt pins)
+        run: |
+          pip install dbt-core==1.11.10 dbt-snowflake==1.11.5
+
+      - name: dbt deps
+        run: dbt deps
+
+      - name: dbt parse
+        run: dbt parse
+
+  sqlfluff-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install sqlfluff
+        run: pip install "sqlfluff>=3.0.0"
+
+      - name: sqlfluff lint
+        run: sqlfluff lint models/

@@ -91,13 +91,64 @@ _(to be populated during Phase 6 — will include setup steps for Azure SQL Data
 
 ## Dashboard
 
-_(to be populated during Phase 5 — screenshots of all five Power BI pages)_
+Five interactive pages built in Power BI Desktop on top of the dbt marts in Snowflake. All-Import storage mode — the `.pbix` opens standalone for portfolio reviewers (data baked into the file).
+
+### Executive Overview
+
+![Executive Overview](powerbi/screenshots/executive_overview.png)
+
+Top-of-funnel KPIs across the M5 dataset (Revenue, Units Sold, Stores, SKUs) plus a daily revenue trend with a dashed 30-day moving average overlay. The landing page — headline numbers and the long-term shape of the business in one glance.
+
+### Demand by Hierarchy
+
+![Demand by Hierarchy](powerbi/screenshots/demand_by_hierarchy.png)
+
+Revenue cuts across the category → department → item hierarchy. The bar charts set the FOODS / HOUSEHOLD / HOBBIES split (FOODS dominates at $60M / 59% of revenue); the matrix drills into department-level share; the Top 10 Items table confirms the classic retail long-tail — even the top 10 SKUs concentrate only ~5.7% of total revenue.
+
+### Promotion & Price
+
+![Promotion & Price](powerbi/screenshots/promotion_and_price.png)
+
+Price-elasticity and SNAP-day story. Average selling price by category (HOUSEHOLD highest, FOODS lowest); the donut shows SNAP-benefit days drive 52% of revenue from ~33% of calendar days; the scatter exposes FOODS_3 as the cheap-price / high-volume outlier — classic price-elasticity in one chart.
+
+### Seasonality & Calendar
+
+![Seasonality & Calendar](powerbi/screenshots/seasonality_and_calendar.png)
+
+Calendar effects on demand. Weekday vs Weekend bars show weekend revenue over-indexes ~33% per day; the Holiday Events bar surfaces SuperBowl as the strongest single-day uplift; the Year × Month heatmap (green sequential gradient) makes year-on-year revenue growth legible across the 2011-2014 history (~50% lift from 2011 to 2013).
+
+### Forecast vs Actual
+
+![Forecast vs Actual](powerbi/screenshots/forecast_vs_actual.png)
+
+Where the project's ML layer lands in the dashboard. Forecast Revenue and Forecast Units KPI cards top-right; the Revenue and Units line charts show actuals (solid green) plus dbt-produced forecasts (dashed red), with 95% confidence intervals (dotted) on the Units chart; the matrix at the bottom splits actual vs forecast by category.
+
+---
+
+## Demo & future revival
+
+The `.pbix` is Import-mode — opening the file demos the entire dashboard standalone with data baked into the VertiPaq cache. Portfolio reviewers get the full BI deliverable by opening the file in Power BI Desktop, no Snowflake connection required.
+
+For a **live refresh demo** 30+ days out (after the Snowflake free-trial credits expire), the revival path is pay-as-you-go on Snowflake Standard for one week the week before the interview (~$5 expected spend on an XSMALL warehouse with 60s auto-suspend). Open `.pbix` → Home → Refresh → re-authenticate to Snowflake → data pulls live from `WAREHOUSE` + `MARTS`. Optional end-to-end demo: trigger `m5_daily_extract` for a fresh `logical_date` in Airflow, watch the 4 tasks go green, refresh PBI, show the new row in the Data view.
+
+See [`POWERBI_PIPELINE.md`](POWERBI_PIPELINE.md) → *Future revival for interview demo* for the full cost ceiling and demo flow.
 
 ---
 
 ## Key learnings
 
-_(to be populated through the project — see `LEARNINGS.md` for the full running journal)_
+See [`LEARNINGS.md`](LEARNINGS.md) for the full running journal — 30+ entries across SQL, Snowflake, Python, dbt, Airflow, Power BI, and CI domains. Headline takeaways from this project:
+
+- **Composite-mode storage forced by `.pbix` file size.** Full-Import on a 33M-row fact produced a 949 MB `.pbix`, exceeding GitHub's 100 MB per-file push limit. Pivot to DirectQuery on the fact + Import on dims dropped the file to 264 KB. Later reverted to all-Import after column-pruning the fact (see POWERBI_PIPELINE.md for the full architectural arc).
+- **User-defined aggregations require DirectQuery on the detail table.** Microsoft Learn surfaced this constraint after we'd built the agg marts in dbt. UDA is architecturally incompatible with all-Import — the agg marts ship with the repo as portfolio-narrative artefacts.
+- **Airflow `schedule=None` for portfolio-demo DAGs.** Unpausing a `@daily` DAG auto-spawns a phantom run for the missed scheduled interval. For demo work, `schedule=None` means the operator controls every run via "Trigger DAG w/ config" — no phantom runs, no failed extracts against missing dates.
+- **NEVER pause an Airflow DAG mid-run.** The scheduler strands tasks in "scheduled" state indefinitely. Sequence is always unpause → trigger → let it complete → THEN pause.
+- **When 3 things look broken at once, suspect ONE root cause.** Phase 5.5 opened with empty slicers, broken KPI cards, and refresh-time cyclic-ref errors — three apparently independent failures, all downstream of Pause Visuals being on. One click fixed all three.
+- **PBI Optimize → Pause Visuals is the FIRST diagnostic** when symptoms include "things blank on click" or "needs refresh after every change". 1-click toggle, highest-signal PBI diagnostic.
+- **Snowflake unquoted identifiers store as UPPERCASE.** dbt's lowercase source → Snowflake's uppercase catalog → PBI's uppercase column names. DAX is case-insensitive but bare names still need to match the catalog — trust Intellisense.
+- **PBI calculated COLUMN vs MEASURE** evaluate in different contexts. The "Cannot find name [column]" error on a visible column is the canonical symptom of clicking New measure when you wanted New column.
+- **Transformation layer hierarchy: dbt → Power Query → DAX → visual.** Do data cleanup at the lowest possible layer. The model has one PQ `Text.Proper` step on a mart column that couldn't be normalised upstream because the dbt source needs the lowercase value for its own use; every other transformation is in dbt.
+- **Scan ALL references when surgically removing a variable from a function.** SQL query, bind tuple, unpack line, log calls, success-path return f-string, failure-check block. The success-path return is the easy-to-miss case because it only executes on the happy path — exactly the path that hasn't been exercised since the modification. Caught with `ruff F821` in CI as defense-in-depth.
 
 ---
 
