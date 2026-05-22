@@ -252,7 +252,16 @@ Three new files shipped at Phase 6 close. Each passed all 10 criteria; results b
 - Pre-flight + post-action verification: this config IS the gate sqlfluff uses for lint verification.
 - Observable progress + actionable errors: rule exclusions documented explain WHY each is off, so future engineers can re-enable confidently.
 
-**No findings to fix.** The Phase 4 audit caught 2 issues; this Phase 6 audit caught 0. Different file class — Phase 4 was author-time SQL + Python scripts where ordering / placeholder management could drift; Phase 6 is single-purpose CI declarations where the entire surface is small and reviewable in one pass. Net: 10-criteria checklist proven applicable across both file classes.
+**No findings to fix at Phase 6 audit.** The Phase 4 audit caught 2 issues; this Phase 6 audit caught 0. Different file class — Phase 4 was author-time SQL + Python scripts where ordering / placeholder management could drift; Phase 6 is single-purpose CI declarations where the entire surface is small and reviewable in one pass. Net: 10-criteria checklist proven applicable across both file classes.
+
+**v1.0.1 patch (2026-05-22 later) — supersedes two of the Phase 6 audit bullets:**
+
+The Phase 6 audit above passed the CI config as shipped, but the first CI run after pushing v1.0 failed. Two bullets above are now historically accurate but operationally stale, superseded as follows:
+
+- **`.github/workflows/dbt-ci.yml` Privacy & security bullet (line 234) supersession.** The sqlfluff-lint job no longer uses dummy env vars — it uses 7 encrypted GitHub Actions Secrets (SNOWFLAKE_* values from local `.env`). The dbt-parse job still uses dummy creds (dbt parse doesn't connect). Mixed-credentials approach is documented in the workflow header comment.
+- **`dbt/.sqlfluff` Currency + Resource efficiency bullets (lines 244, 246) supersession.** Templater switched from `jinja` to `dbt` because the jinja templater + `apply_dbt_builtins = true` resolves dbt-core macros (ref / source / var) but NOT package macros (anything namespaced like `dbt_utils.*`). Project #2 uses `dbt_utils.generate_surrogate_key()` in 5 models, so the dbt templater is structurally required. The dbt templater calls `dbt compile` which initializes the Snowflake adapter and validates the connection — meaning lint DOES now require warehouse connectivity, contrary to the original "no DB connection required" claim. Net change: heavier CI (~30s extra to install dbt + dbt deps), more dependencies, but the lint actually works against package-macro-using SQL.
+
+**Audit takeaway from the patch:** the Phase 6 audit was correct on the criteria it tested (the bullets all held at audit time), but missed a CROSS-CONFIG INTERACTION — the .sqlfluff templater choice depended on the .sql model contents not using any package macros, an unspoken assumption that broke as soon as CI actually ran against real model files. Carry-forward criterion candidate: **"Cross-file dependency check"** — verify that config files A and B agree on the assumptions each makes about the other, before declaring either passes audit. Banked for Project #3 Phase 0. Full saga in `LEARNINGS.md` under "2026-05-22 (later) — v1.0.1 patch".
 
 ---
 

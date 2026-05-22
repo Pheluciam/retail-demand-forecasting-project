@@ -1625,11 +1625,41 @@ networking between containers)_
 
 **Project #2 v1.0 CI shipped 2026-05-22 (Phase 6 close):**
 
-- `.github/workflows/lint-python.yml` — ruff F821 undefined-name gate (see entry above).
-- `.github/workflows/dbt-ci.yml` — dbt parse + sqlfluff lint on PR + push when `dbt/**` changes. Dummy Snowflake env vars in the job env so `dbt parse` templates without needing real credentials; `dbt test` deliberately excluded with an inline comment explaining the cost-avoidance reasoning (would burn pay-as-you-go credits on every push, run locally before merging).
-- `dbt/.sqlfluff` — Snowflake dialect, jinja templater (no DB connection needed for CI), uppercase keywords, 120-char line length, 3 rule exclusions documented inline (LT05 / RF02 / ST05).
+> **Important: this initial v1.0 CI design was patched within hours of shipping. See the v1.0.1 patch block immediately below for the corrected design and the saga that drove it. The bullets here describe what shipped first, not what's running now.**
 
-**Carry-forward:** Project #3 starts with `.github/workflows/` already populated from this template. Add domain-specific tests on top of the F821 + dbt-parse + sqlfluff foundation.
+- `.github/workflows/lint-python.yml` — ruff F821 undefined-name gate (see entry above). Unchanged in v1.0.1.
+- `.github/workflows/dbt-ci.yml` — dbt parse + sqlfluff lint on PR + push when `dbt/**` changes. Dummy Snowflake env vars in the job env so `dbt parse` templates without needing real credentials; `dbt test` deliberately excluded with an inline comment explaining the cost-avoidance reasoning (would burn pay-as-you-go credits on every push, run locally before merging). **sqlfluff-lint job rewired in v1.0.1 to use real Snowflake creds via GitHub Secrets — see below.**
+- `dbt/.sqlfluff` — Snowflake dialect, jinja templater (no DB connection needed for CI), uppercase keywords, 120-char line length, 3 rule exclusions documented inline (LT05 / RF02 / ST05). **Templater switched to dbt in v1.0.1 — jinja templater couldn't resolve dbt_utils package macros.**
+
+**Carry-forward:** Project #3 starts with `.github/workflows/` already populated from this template — but use the v1.0.1 corrected design, not what shipped at v1.0. Add domain-specific tests on top of the F821 + dbt-parse + sqlfluff foundation.
+
+### 2026-05-22 (later) — v1.0.1 patch: sqlfluff dbt templater + GitHub Secrets pattern; jinja templater can't resolve package macros
+
+The CI shipped at v1.0 had a structural flaw discovered on the first run: the jinja templater with `apply_dbt_builtins = true` resolves dbt-core macros (`ref()`, `source()`, `var()`) but NOT package macros — anything namespaced like `dbt_utils.*`. Project #2 uses `dbt_utils.generate_surrogate_key()` in 5 SQL models. Result: sqlfluff saw raw `{{ dbt_utils.* }}` jinja text in those files, couldn't parse them as SQL, threw cascading bogus errors (LT01 / LT02 / CP01 / PRS against literal template text), and failed CI with a red X on the main branch — the headline portfolio commit.
+
+**Why dummy creds with the dbt templater also failed (the first attempted fix):** the dbt templater calls `dbt compile` under the hood, not `dbt parse`. `dbt compile` initializes the Snowflake adapter and validates the connection. Dummy creds fail with a 404 against the fake account hostname. Confirmed in local test — exact error: `dbt.adapters.exceptions.connection.FailedToConnectError: Database Error 290404 (08001): 404 Not Found: post ci-dummy-account.snowflakecomputing.com:443/session/v1/login-request`. The "no-secrets-in-CI" design constraint that drove the original jinja choice is structurally incompatible with the dbt templater for warehouse-backed adapters.
+
+**What worked (v1.0.1 design):**
+
+1. **Switched `dbt/.sqlfluff` templater from `jinja` to `dbt`.** Added `[sqlfluff:templater:dbt]` section with `project_dir = .` and `profiles_dir = .`.
+2. **Added 7 GitHub Actions Secrets to the repo settings**: SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD, SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA. Values from local `.env`. GitHub Secrets are encrypted at rest, never logged in workflow output, auto-scrubbed from any echo/print, and not visible to forkers or to the repo owner after creation (only update or delete).
+3. **Updated `.github/workflows/dbt-ci.yml` sqlfluff-lint job** to reference `${{ secrets.SNOWFLAKE_* }}` instead of hardcoded dummies. Added install steps for `dbt-core==1.11.10`, `dbt-snowflake==1.11.5`, `sqlfluff-templater-dbt>=3.0.0`, and a `dbt deps` step before the lint command.
+4. **dbt-parse job kept its dummy creds** — `dbt parse` truly doesn't connect, dummies work fine. Mixed-credentials approach is honest and documented in the workflow header.
+5. **After the templater fix, sqlfluff surfaced REAL style violations** that had been hidden behind the parse cascade — LT01 (spacing around `AS`), LT02 (indentation), CP01 (keyword case), AL01 (implicit aliasing). Ran `sqlfluff fix --force models/` locally to auto-correct most violations across 8 SQL files.
+6. **Two stragglers remained that auto-fix couldn't handle**: `int_sales_with_prices.sql` (joined CTE body) and `agg_sales_daily_item_cat.sql` (aggregated CTE body) had their CTE bodies unindented while all OTHER CTEs in those files used 4-space indent. `sqlfluff fix --force` doesn't safely auto-reindent multi-line CTE bodies where the source uses unconventional indentation. Manual fix required (Edit tool, prepend 4 spaces to ~15 lines per file).
+7. **Local lint went clean.** Committed + pushed. CI went green on commit `d434493`.
+
+**Long-term degradation plan (documented in workflow header):** the Snowflake trial expires ~2026-06-12 (21 days after v1.0.1 ship). When it does, sqlfluff-lint will start failing because creds won't authenticate. Graceful degradation = switch the sqlfluff-lint job to `continue-on-error: true` at that point. The dbt-parse job will keep passing on dummy creds because it doesn't connect. The lint job still RUNS and prints output, just stops blocking the workflow status. Better than removing the job entirely (preserves portfolio CI story).
+
+**Carry-forward to Project #3 (CRITICAL — bake into Phase 0):**
+
+1. **Use sqlfluff's `dbt` templater from day 1, not `jinja`.** Resist the "no-secrets-in-CI" simplification. As soon as you pull in any dbt package (dbt_utils, dbt_expectations, dbt_external_tables, audit_helper, etc.), the jinja templater + `apply_dbt_builtins` is structurally inadequate.
+2. **Wire real warehouse credentials via GitHub Secrets in Phase 0 CI, not as a retrofit.** For Project #3 (Databricks lakehouse): use DATABRICKS_HOST + DATABRICKS_TOKEN + DATABRICKS_HTTP_PATH as secrets. Retrofitting after the project has ~10 dbt models is much more painful than starting with it.
+3. **Document the trial-expiry degradation plan in the workflow header at Phase 0.** Future-you will need it. Include the exact `continue-on-error: true` snippet ready to drop in.
+4. **Run sqlfluff lint LOCALLY before the first CI push.** Project #2's first CI run was the first time anyone tried to lint the project end-to-end — exactly when ~30 violations surfaced at once. Smaller-batch fixes during the build avoid this surprise.
+5. **`sqlfluff fix --force` is good for ~80% of violations but doesn't safely reindent multi-line CTE bodies.** Plan for some manual cleanup time at the end. The known unfixable pattern: CTE body at column 1 inside parens when other CTEs in the same file are indented.
+6. **Be wary of cascading errors.** When sqlfluff outputs hundreds of violations of varied types after a config change, the FIRST diagnostic question is "is the templater resolving macros properly?" — not "are these all real style nits?". A parse-level failure can masquerade as a tsunami of style failures. Cascading PRS / TMP errors are the tell.
+7. **Demo-durability principle #5 (GitHub repo = canonical artifact) means the green CI badge actually matters.** Recruiters scan the repo for it. Accept the operational cost of real-creds CI (small) for the portfolio cost of a red X (significant).
 
 ---
 

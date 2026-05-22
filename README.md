@@ -16,7 +16,7 @@
 - **Realistic enterprise pattern**: relational source (representing an ERP / Microsoft Dynamics system) → cloud warehouse → BI tool
 - **Five-page Power BI dashboard** — Executive Overview, Demand by Hierarchy, Promotion & Price, Seasonality & Calendar, Forecast vs Actual (with a working forecasting layer, not a stub)
 - **Time-series forecasting layer** built end-to-end and joined to actuals via a dedicated `mart_forecast_vs_actual` dbt model — surfaces the headline business question on the dashboard ("how is reality tracking against the forecast?") with full lineage back through the pipeline
-- **GitHub Actions CI**: `dbt parse` + `dbt test` + dbt slim CI + `sqlfluff` lint + markdown lint on every PR. `dbt docs generate` hosted on GitHub Pages
+- **GitHub Actions CI**: `dbt parse` + `sqlfluff` lint (dbt templater + encrypted Snowflake GitHub Secrets) + `ruff` F821 Python lint on every push and PR. `dbt test` deliberately excluded from CI to avoid burning Snowflake pay-as-you-go credits — run locally before merging
 
 ---
 
@@ -53,7 +53,7 @@ flowchart LR
 | Transformations | dbt (`dbt-snowflake`, `dbt_utils`)                               |
 | BI              | Power BI Desktop                                                 |
 | Version control | Git + GitHub                                                     |
-| CI/CD           | GitHub Actions (`dbt parse`, tests, `sqlfluff` lint)             |
+| CI/CD           | GitHub Actions (`dbt parse`, `sqlfluff` lint, `ruff` F821)       |
 
 ---
 

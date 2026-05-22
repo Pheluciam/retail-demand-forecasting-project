@@ -809,7 +809,37 @@ See `PROJECT_PLAN.md` for the full table. Key updates since the original plan:
 ### Session 2 (2026-05-15 — ✅ DONE)
 
 1. ✅ Re-anchored on PROJECT_CONTEXT.md + PROJECT_PLAN.md; refreshed 5 stale spots in PROJECT_PLAN.md and pushed as commit `9e25491` (small docs-only commit early in the session).
-2. ✅ Added `verify_one_day` @task downstream of `extract_one_day` in `m5_daily_extract`. Three Snowflake-side checks batched into one SQL round-trip. Task chain: `extract_one_day() >> verify_one_day()`. Per-check logging added.
+2. ✅ Added `verify_one_day` @task downstream of `extract_one_day` in `m5_daily_extract`. Three Snowflake-side checks batched into one SQL round-trip. Task chain: `extract_one_day() >> verify_one_day()`.
+
+---
+
+## Fast-forward + v1.0.1 patch (appended 2026-05-22)
+
+> Honest note on this file: detailed per-session logging in PROJECT_CONTEXT.md ended at Phase 3 session 2. Phases 3 (rest) through 6 were captured in `LEARNINGS.md` (technical entries + carry-forwards) and `LEARNING_ROADMAP.md` (cross-project context). This appended block records the post-v1.0 patch specifically, because it happened after shipping and warrants its own rolling-state entry.
+
+### v1.0.1 patch — 2026-05-22 (later, same day as v1.0 ship)
+
+**Trigger.** First CI run on the v1.0 ship commit (`2a737a5`) failed with a red X on the main branch — the headline portfolio commit visible to every repo visitor. Root cause: `dbt/.sqlfluff` was configured with the jinja templater + `apply_dbt_builtins = true`, which resolves dbt-core macros (ref/source/var) but NOT package macros. Project #2 uses `dbt_utils.generate_surrogate_key()` in 5 SQL models. sqlfluff couldn't parse the unresolved jinja and cascaded into 30+ bogus errors. Full saga + Project #3 carry-forwards in `LEARNINGS.md` under the dated entry "2026-05-22 (later) — v1.0.1 patch".
+
+**What changed:**
+
+1. `dbt/.sqlfluff` — templater switched from `jinja` to `dbt`. Added `[sqlfluff:templater:dbt]` section.
+2. `.github/workflows/dbt-ci.yml` — `sqlfluff-lint` job rewired to use real Snowflake creds via 7 encrypted GitHub Actions Secrets (SNOWFLAKE_ACCOUNT / USER / PASSWORD / ROLE / WAREHOUSE / DATABASE / SCHEMA). Added install steps for `dbt-core==1.11.10`, `dbt-snowflake==1.11.5`, `sqlfluff-templater-dbt>=3.0.0`, and a `dbt deps` step. dbt-parse job kept its dummy creds (dbt parse doesn't connect).
+3. 8 dbt models auto-fixed via `sqlfluff fix --force models/` locally (LT01 spacing, LT02 indentation, CP01 keyword case, AL01 implicit aliasing).
+4. 2 dbt models manually reindented where auto-fix couldn't safely reindent multi-line CTE bodies: `int_sales_with_prices.sql` (joined CTE), `agg_sales_daily_item_cat.sql` (aggregated CTE).
+5. Workflow file + .sqlfluff header comments updated to reflect the new design + the documented degradation plan for when the Snowflake trial expires (~2026-06-12).
+
+**Commits:**
+
+- `421be09` — "ci: switch sqlfluff to dbt templater + secrets" (workflow + config change).
+- `d434493` — "ci: fix sqlfluff style violations in dbt models" (auto-fix + manual reindents).
+- (docs commit pending — this PROJECT_CONTEXT.md entry, LEARNINGS.md new entry, CODE_QUALITY.md inline correction, README.md CI bullets corrected).
+
+**Resulting CI status:** GREEN on commit `d434493`. Both `dbt-parse` (37s) and `sqlfluff-lint` (42s) jobs passing. Red X on the v1.0 ship commit (`2a737a5`) remains in history — that's normal and unavoidable for past commits.
+
+**Project #3 carry-forwards banked:** see `LEARNINGS.md` v1.0.1 patch entry, "Carry-forward to Project #3 (CRITICAL — bake into Phase 0)" subsection. Seven specific Phase 0 carry-forwards covering templater choice, secrets-in-CI, trial-expiry degradation plan, local-lint-before-first-push discipline, auto-fix limits, cascading-error diagnostic discipline, and recruiter-facing badge value.
+
+**Status:** Project #2 v1.0.1 is the current shipped state. Project #3 (`financial-analytics-lakehouse-project`) folder created with the three carry-forward .md files (TEACHING_PREFERENCES, LEARNING_ROADMAP, LEARNINGS — but LEARNINGS needs re-copying post-v1.0.1 to pick up the patch entry). Per-check logging added.
 3. ✅ End-to-end test trigger for `2014-01-03` via Airflow CLI: extract + verify both green. Three count log lines visible: CALENDAR=1, SELL_PRICES=25,939, SALES_TRAIN=30,490.
 4. ✅ **Real silent failure caught:** today's `2026-05-15` auto-fire upon unpause extracted 0 rows (no M5 data for that date), extract returned cleanly, verify raised RuntimeError on all three checks. Exactly the failure mode the verify task was built to catch.
 5. ✅ Enabled UI trigger-with-config form via `AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: 'true'` in docker-compose.yml. Full `down` + `up -d` cycle to apply. Diagnosed via `docker compose exec airflow-webserver airflow config get-value webserver show_trigger_form_if_no_params` → returned `true`.
