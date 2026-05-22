@@ -25,7 +25,7 @@ sales_with_week AS (
         sales.*,
         calendar.wm_yr_wk
     FROM sales
-    LEFT JOIN calendar USING (d)
+    LEFT JOIN calendar ON sales.d = calendar.d
 ),
 
 joined AS (
@@ -41,9 +41,10 @@ joined AS (
         sales_with_week.units_sold * prices.sell_price AS revenue_amount_usd
     FROM sales_with_week
     LEFT JOIN prices
-        ON sales_with_week.store_id = prices.store_id
-        AND sales_with_week.item_id = prices.item_id
-        AND sales_with_week.wm_yr_wk = prices.wm_yr_wk
+        ON
+            sales_with_week.store_id = prices.store_id
+            AND sales_with_week.item_id = prices.item_id
+            AND sales_with_week.wm_yr_wk = prices.wm_yr_wk
 )
 
 SELECT * FROM joined

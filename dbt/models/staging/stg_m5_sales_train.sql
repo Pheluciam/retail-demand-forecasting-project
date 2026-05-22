@@ -29,9 +29,9 @@ joined AS (
         s.state_id,
         s.d,
         c.calendar_date AS sale_date,
-        s.sales         AS units_sold
-    FROM source s
-    LEFT JOIN calendar c
+        s.sales AS units_sold
+    FROM source AS s
+    LEFT JOIN calendar AS c
         ON s.d = c.d
 
 )

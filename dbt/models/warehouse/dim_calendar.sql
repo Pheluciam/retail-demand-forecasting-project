@@ -28,16 +28,16 @@ WITH source AS (
 
 future_dates AS (
     SELECT
-        DATEADD(day, seq4() + 1, (SELECT MAX(calendar_date) FROM source))::DATE AS calendar_date,
+        DATEADD(DAY, SEQ4() + 1, (SELECT MAX(calendar_date) FROM source))::DATE AS calendar_date,
         NULL::VARCHAR AS d,
-        NULL::NUMBER  AS wm_yr_wk,
+        NULL::NUMBER AS wm_yr_wk,
         NULL::VARCHAR AS event_name_1,
         NULL::VARCHAR AS event_type_1,
         NULL::VARCHAR AS event_name_2,
         NULL::VARCHAR AS event_type_2,
-        NULL::NUMBER  AS snap_ca,
-        NULL::NUMBER  AS snap_tx,
-        NULL::NUMBER  AS snap_wi
+        NULL::NUMBER AS snap_ca,
+        NULL::NUMBER AS snap_tx,
+        NULL::NUMBER AS snap_wi
     FROM TABLE(GENERATOR(ROWCOUNT => 60))
 ),
 
@@ -52,37 +52,29 @@ enriched AS (
         calendar_date,
         d,
 
-        DATE_PART('year', calendar_date)    AS year,
-        DATE_PART('quarter', calendar_date) AS quarter,
-        DATE_PART('month', calendar_date)   AS month,
-        MONTHNAME(calendar_date)            AS month_name,
-        DATE_PART('day', calendar_date)     AS day_of_month,
-        DAYOFWEEKISO(calendar_date)         AS day_of_week,
-        DAYNAME(calendar_date)              AS day_name,
-        WEEKISO(calendar_date)              AS week_of_year,
-
-        CASE
-            WHEN DAYNAME(calendar_date) IN ('Sat', 'Sun')
-            THEN TRUE
-            ELSE FALSE
-        END AS is_weekend,
-
         wm_yr_wk,
-
         event_name_1,
         event_type_1,
         event_name_2,
         event_type_2,
-
-        CASE
-            WHEN event_name_1 IS NOT NULL OR event_name_2 IS NOT NULL
-            THEN TRUE
-            ELSE FALSE
-        END AS is_holiday,
-
         snap_ca,
         snap_tx,
-        snap_wi
+        snap_wi,
+
+        DATE_PART('year', calendar_date) AS year,
+
+        DATE_PART('quarter', calendar_date) AS quarter,
+
+        DATE_PART('month', calendar_date) AS month,
+        MONTHNAME(calendar_date) AS month_name,
+        DATE_PART('day', calendar_date) AS day_of_month,
+        DAYOFWEEKISO(calendar_date) AS day_of_week,
+
+        DAYNAME(calendar_date) AS day_name,
+
+        WEEKISO(calendar_date) AS week_of_year,
+        COALESCE(DAYNAME(calendar_date) IN ('Sat', 'Sun'), FALSE) AS is_weekend,
+        COALESCE(event_name_1 IS NOT NULL OR event_name_2 IS NOT NULL, FALSE) AS is_holiday
     FROM combined
 ),
 

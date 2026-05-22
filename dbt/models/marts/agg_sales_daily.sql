@@ -15,10 +15,10 @@ WITH source AS (
 aggregated AS (
     SELECT
         date_key,
-        SUM(units_sold)                                              AS total_units_sold,
-        SUM(revenue_amount_usd)                                      AS total_revenue_usd,
-        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN item_id  END)   AS active_item_count,
-        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN store_id END)   AS active_store_count
+        SUM(units_sold) AS total_units_sold,
+        SUM(revenue_amount_usd) AS total_revenue_usd,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN item_id END) AS active_item_count,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN store_id END) AS active_store_count
     FROM source
     GROUP BY date_key
 )

@@ -33,9 +33,9 @@ WITH source AS (
 final AS (
     SELECT
         {{ dbt_utils.generate_surrogate_key(['item_id', 'store_id', 'sale_date']) }} AS sale_key,
-        {{ dbt_utils.generate_surrogate_key(['item_id']) }}                          AS item_key,
-        {{ dbt_utils.generate_surrogate_key(['store_id']) }}                         AS store_key,
-        {{ dbt_utils.generate_surrogate_key(['sale_date']) }}                        AS date_key,
+        {{ dbt_utils.generate_surrogate_key(['item_id']) }} AS item_key,
+        {{ dbt_utils.generate_surrogate_key(['store_id']) }} AS store_key,
+        {{ dbt_utils.generate_surrogate_key(['sale_date']) }} AS date_key,
         item_id,
         store_id,
         sale_date,

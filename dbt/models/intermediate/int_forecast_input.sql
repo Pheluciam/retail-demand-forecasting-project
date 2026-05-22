@@ -19,7 +19,7 @@ WITH aggregated AS (
 )
 
 SELECT
-    item_id  AS series_id,
+    item_id AS series_id,
     sale_date,
     units_sold
 FROM aggregated

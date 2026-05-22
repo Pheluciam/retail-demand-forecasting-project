@@ -15,19 +15,19 @@ WITH source AS (
         f.store_id,
         f.units_sold,
         f.revenue_amount_usd
-    FROM {{ ref('fact_daily_sales') }} f
-    INNER JOIN {{ ref('dim_item') }} i
-        USING (item_key)
+    FROM {{ ref('fact_daily_sales') }} AS f
+    INNER JOIN {{ ref('dim_item') }} AS i
+        ON f.item_key = i.item_key
 ),
 
 aggregated AS (
     SELECT
         date_key,
         cat_id,
-        SUM(units_sold)                                              AS total_units_sold,
-        SUM(revenue_amount_usd)                                      AS total_revenue_usd,
-        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN item_id  END)   AS active_item_count,
-        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN store_id END)   AS active_store_count
+        SUM(units_sold) AS total_units_sold,
+        SUM(revenue_amount_usd) AS total_revenue_usd,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN item_id END) AS active_item_count,
+        COUNT(DISTINCT CASE WHEN units_sold > 0 THEN store_id END) AS active_store_count
     FROM source
     GROUP BY date_key, cat_id
 )

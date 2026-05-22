@@ -15,7 +15,7 @@ SELECT
     event_type_1,
     event_name_2,
     event_type_2,
-    snap_CA AS snap_ca,
-    snap_TX AS snap_tx,
-    snap_WI AS snap_wi
+    snap_ca,
+    snap_tx,
+    snap_wi
 FROM {{ source('m5', 'CALENDAR') }}

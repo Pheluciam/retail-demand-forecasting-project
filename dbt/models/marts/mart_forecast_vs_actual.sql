@@ -15,14 +15,14 @@ WITH actuals AS (
     SELECT
         f.date_key,
         f.item_key,
-        f.sale_date                          AS observation_date,
+        f.sale_date AS observation_date,
         f.item_id,
-        SUM(f.units_sold)                    AS units,
-        SUM(f.revenue_amount_usd)            AS revenue_usd,
-        CAST(NULL AS FLOAT)                  AS units_lower_95,
-        CAST(NULL AS FLOAT)                  AS units_upper_95,
-        'actual'                             AS series_type
-    FROM {{ ref('fact_daily_sales') }} f
+        SUM(f.units_sold) AS units,
+        SUM(f.revenue_amount_usd) AS revenue_usd,
+        CAST(NULL AS FLOAT) AS units_lower_95,
+        CAST(NULL AS FLOAT) AS units_upper_95,
+        'actual' AS series_type
+    FROM {{ ref('fact_daily_sales') }} AS f
     GROUP BY f.date_key, f.item_key, f.sale_date, f.item_id
 ),
 
@@ -30,14 +30,14 @@ forecasts AS (
     SELECT
         f.date_key,
         f.item_key,
-        f.forecast_date                      AS observation_date,
+        f.forecast_date AS observation_date,
         f.item_id,
-        f.forecast_units                     AS units,
-        f.forecast_revenue_usd               AS revenue_usd,
-        f.forecast_units_lower_95            AS units_lower_95,
-        f.forecast_units_upper_95            AS units_upper_95,
-        'forecast'                           AS series_type
-    FROM {{ ref('fact_forecast_daily') }} f
+        f.forecast_units AS units,
+        f.forecast_revenue_usd AS revenue_usd,
+        f.forecast_units_lower_95 AS units_lower_95,
+        f.forecast_units_upper_95 AS units_upper_95,
+        'forecast' AS series_type
+    FROM {{ ref('fact_forecast_daily') }} AS f
 )
 
 SELECT * FROM actuals
