@@ -337,15 +337,33 @@ Do these in order. Don't skip steps.
 
 **Phase E — Polish + commit.**
 
-- [x] Cross-page slicer sync (Date + Category synced to all 5 pages; State synced to 4 of 5 — not on Forecast vs Actual by design). *(done 2026-05-21 session 5.7)*
-- [x] Theme polish — City Park built-in theme applied; per-page formatting end-to-end on 3 of 5 pages (Executive Overview, Demand by Hierarchy, Promotion & Price). Seasonality & Calendar + Forecast vs Actual deferred to 5.8. *(done 2026-05-21 session 5.7 — partial)*
-- [ ] Seasonality & Calendar polish (5.8 — slicers compact; need theme cohesion + visual coloring + title renames + heatmap cosmetic polish).
-- [ ] Forecast vs Actual polish (5.8 — KPI card pair completion + line chart spacing + dashed/dotted styling on Forecast / Upper 95 / Lower 95 + matrix cosmetic polish).
-- [ ] Drill-through actions (Demand by Hierarchy → Item Detail; Promotion & Price → Item Detail).
-- [ ] VertiPaq Analyzer check on dims.
-- [ ] Delete unused measures (final scan once 5.8 polish complete).
-- [ ] End-to-end DAG smoke test (single date, fresh).
-- [ ] Phase-boundary structural audit + bundled commit.
+- [x] Cross-page slicer sync (Date + Category synced to all 5 pages by 5.7; Forecast vs Actual Date un-synced in 5.8 to allow forecast-horizon zoom without affecting other pages). *(done 2026-05-21 / 2026-05-22)*
+- [x] Theme polish — City Park built-in theme applied; per-page formatting end-to-end on all 5 pages. Design language locked across project: cat_id blue/purple/green; warm red as event/forecast/over-index callout; grey as neutral baseline; green as sequential heat. *(done 2026-05-21 → 2026-05-22)*
+- [x] Seasonality & Calendar polish (5.8 — Day Type calc column for readable axis labels; SNAP Day Type rewritten on existing column; titles renamed; Holiday Top N filter; heatmap green sequential gradient + Grow to fit + Don't format blank handling). *(done 2026-05-22 session 5.8)*
+- [x] Forecast vs Actual polish (5.8 — Forecast Units companion KPI card; dashed Forecast + dotted Upper/Lower 95 styling; last-90-days date zoom via un-synced slicer; matrix Power Query Replace Values for actual→Actual / forecast→Forecast + Rename for this visual dropping (Mart) suffix on column headers + Row padding + Grow to fit + No fill alternate background). *(done 2026-05-22 session 5.8)*
+- [~] Drill-through actions — ATTEMPTED + PULLED. Item Detail destination page built and wired (DIM_ITEM[ITEM_ID] in drill-through field well, Used as category, Keep all filters Off, page hidden). Right-click trigger from source visuals did not fire in user's stock free PBI Desktop variant despite spec-correct wiring. Community-cited Page type = Drillthrough toggle not exposed in user's Page information section (only Set as landing page / Allow use as tooltip / Allow Q&A present). Variant-specific UI issue; investigation halted to preserve session budget for remaining 5.8 items. Item Detail page deleted. PBI's automatic cross-filtering retains as the page-level interactivity story. *(attempted + pulled 2026-05-22 session 5.8)*
+- [x] VertiPaq Analyzer check on dims — DAX Studio installed (per-user path, External Tools ribbon registration didn't take, but standalone launch from Start Menu → Connect dialog → Power BI / SSDT Model radio works). View Metrics run; .vpax exported to `powerbi/retail_demand_forecasting.vpax`. Total model size ~254 MB compressed; FACT_DAILY_SALES dominant at 67%; forecast layer 25%; dims compact. *(done 2026-05-22 session 5.8)*
+- [x] Delete unused measures — 4 speculative time-intel measures deleted (Revenue PY, Revenue YoY $, Revenue YoY %, Revenue YTD; all created for YoY indicator + YTD pill patterns that were skipped due to new Card visual Reference labels variant issue). Final count: 16 measures on _Measures. *(done 2026-05-22 session 5.8)*
+- [x] Power Query consolidation (bonus 5.8 cleanup) — MART_FORECAST_VS_ACTUAL.SERIES_TYPE casing fix consolidated from 2 Replace Values steps to 1 Capitalize Each Word step using Text.Proper. Cleaner M code. *(done 2026-05-22 session 5.8)*
+- [ ] End-to-end DAG smoke test (single date, fresh) — DEFERRED to 5.9, then Phase 6 close.
+- [x] Phase-boundary bundled commit + push — 5.8 documentation updated mid-session (LEARNINGS / PROJECT_CONTEXT / PROJECT_PLAN / this playbook all bumped). 5.8 commits the polished .pbix + .vpax export + all docs at session close. *(done 2026-05-22 session 5.8)*
+
+**Locked design language for this project (referenced from 5.8 closeout):**
+
+- **Categorical (cat_id)**: blue / purple / green (FOODS / HOBBIES / HOUSEHOLD)
+- **Warm accent (event / forecast / over-index / callout state)**: red
+- **Neutral baseline state**: grey
+- **Sequential heat (heatmap)**: green
+- **True/False as semantic states**: lowercase booleans rewritten to readable text via calc columns (Day Type, SNAP Day Type) — the underlying field exposes the design meaning, not the abstract bool.
+
+**Locked discipline rules from 5.8 (carry forward to Project #3):**
+
+- Apply theme after first 1-2 visuals, NOT at polish-pass time. Theme propagation reorganizes all previously-formatted visuals.
+- Wire and test drill-through with 1-2 source visuals + minimal destination, BEFORE investing in source-visual formatting. Failed-trigger fix often requires delete + re-add of source visual; testing early means losing only seconds of work.
+- For categorical value renames in matrix/table column headers driven by a category column, use Power Query → Replace Values. In-visual Rename for this visual works only for measure pills, not category values.
+- Install all PBI external tools (DAX Studio, Tabular Editor, Bravo, ALM Toolkit) as "Install for all users" — per-user install path places pbitool.json in non-scanned location.
+- PBI Desktop format pane control locations vary heavily by variant — pin EXACT paths from screenshot before prescribing. Common paths in May 2026 stock free Desktop: matrix Row padding → Grid → Options; matrix Grow to fit → Layout → Column width → Auto-size behavior (Custom widths Off); conditional formatting → Cell elements → Apply settings to → fx.
+- **Transformation layer hierarchy — do data cleanup at the LOWEST layer possible.** Source (dbt/SQL) → Power Query (M) → DAX calc column → DAX measure → visual-level rename. Cleanup belongs upstream: casing fixes, dropping unused columns, type conversions, conditional-derived columns, row filtering. Power Query is the second-best layer when source isn't an option — it runs on every refresh, persists across visuals, no calc-column VertiPaq overhead. DAX calc columns only when row context is needed AND Power Query can't express the transform (rare). Visual-level rename is the last resort, only for per-visual presentation. **For Project #3: bake a "Power Query checklist at load time" step into the PBI build order — happens AFTER Get Data, BEFORE building any visuals. Checklist: rename columns to human-friendly names; remove unused columns; explicit Change Type; Replace Values for casing/text fixes; filter test/soft-deleted rows; document non-obvious steps in M comments.**
 
 ---
 

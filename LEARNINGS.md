@@ -1347,6 +1347,159 @@ Surfaced during Phase 5 session 5.7 polish pass when trying to add a YoY % indic
 
 **Carry-forward to Project #3.** Same discipline applies to any incrementally-released BI tool feature — Tableau, Looker, Mode, etc. Doc-described capabilities and user-visible capabilities are not always the same set. Screenshot-first feature-detect saves the time wasted recommending a path the user can't take.
 
+### 2026-05-22 — Power BI Desktop format pane control locations vary heavily by variant — pin exact paths for common controls
+
+Surfaced repeatedly during Phase 5 session 5.8 polish pass. The new Power BI Desktop format pane has been reorganised through 2024-2026 and controls don't always live where Microsoft Learn or community blogs say they do. Worse, in this user's stock free Desktop variant, some controls were in non-obvious sub-sections that required multiple research detours to find. Pinning the actual locations as confirmed in this user's variant (May 2026 stock free Desktop):
+
+**Matrix controls:**
+
+- **Row padding** → Format → Visual → **Grid** → **Options** sub-card → Row padding (NOT in Row headers / NOT in Values — both have Font/Text/alignment only)
+- **Global font size** for all matrix text → Format → Visual → **Grid** → **Options** → Global font size (one control bumps all matrix text proportionally; cleaner than per-section font edits)
+- **Auto-size column width / Grow to fit** → Format → Visual → **Layout** → **Column width** → Auto-size behavior dropdown = "Grow to fit"; companion toggle: **Custom widths** must be OFF for Grow to fit to actually distribute evenly (custom widths from prior manual drags override Grow to fit per-column)
+- **Conditional formatting (background gradient, blank value handling)** → Format → Visual → **Cell elements** → "Apply settings to" dropdown (pick the target measure) → Background color toggle ON → click **fx** for the gradient dialog. Inside the dialog: "Apply to" = Values only excludes the Total column/row from the gradient; "How should we format empty values?" = Don't format (or Specific color → No fill) kills the gradient on truly-empty cells. The other CF access route via Build pane → Values well → ▾ on the measure → Conditional formatting works equivalently but only when the visual is selected.
+
+**Format pane section names vary by visual type** (already locked 2026-05-21):
+
+- Bar chart (horizontal) → Bars section
+- Column chart (vertical) → Columns section
+- Scatter / bubble → Markers section
+- Donut / pie → Slices section
+- Line chart → Lines section
+
+**New Card visual field wells are Value / Categories / Tooltips / Drill through — NEVER "Fields well".** Banking this explicitly because saying "Fields well" wasted time across multiple turns. The classic Card visual had a "Fields" well; the new Card visual (Nov 2025 GA, default in current builds) uses "Value" as the primary field well name. Reference labels field well is variant-dependent (locked 2026-05-21).
+
+**Carry-forward discipline:** when an instruction references any specific format pane section, sub-card, or field well name, web-check the EXACT location in the user's variant by asking for a screenshot of the relevant pane FIRST. Don't prescribe from memory of where it "should be" based on docs. Variant differences are real and prescribing-and-correcting wastes the user's time more than asking-and-confirming up front.
+
+### 2026-05-22 — Power BI build order: pick theme + test drill-through EARLY with 1-2 visuals, NOT at polish-pass time
+
+Two related carry-forward discipline rules surfaced after session 5.8's painful drill-through and theme-cohesion experiences. The user specifically asked these be banked for Project #3.
+
+**Rule 1 — apply theme after 1-2 visuals exist, not after the report is built.** Power BI themes propagate font sizes, colors, default visual styling, and spacing across every visual on every page when applied. Building all 22 visuals across 5 pages with default formatting and then applying the theme at the polish-pass stage means every previously-formatted visual gets some properties overwritten or reorganized — net effect is rework on the visual formatting that was already invested. Build 1-2 visuals first, apply the theme, verify it looks how the user wants, then continue building. Theme-first means subsequent polish layers on top of the theme cleanly.
+
+**Rule 2 — wire and TEST drill-through with 1-2 source visuals + a minimal destination page, BEFORE investing in source-visual formatting.** Power BI drill-through has known fragility around right-click trigger detection (community threads cite various causes: lineage mismatch, hidden destination page, blocked dim table, Page type setting, variant differences in the Page information section). When the right-click trigger fails to fire despite spec-correct wiring, the most commonly-cited community fix is to delete and re-add the source visual. If the source visual has already been polished with category-keyed colors, title renames, format-pane work, etc., that polish is lost. Testing drill-through EARLY with a minimal source visual (just the field, no formatting) means a failed trigger only costs 30 seconds of re-add. Testing drill-through LATE means losing significant polish work.
+
+**Carry-forward to Project #3:** add "apply theme after first 1-2 visuals" and "wire + test drill-through after first 1-2 source visuals" as two locked steps in the Power BI build order, before the full visual build. Project #3's Power BI playbook should bake these in at the page-build phase, not the polish phase.
+
+### 2026-05-22 — Power BI Desktop drill-through right-click trigger silently failing despite spec-correct wiring (unresolved)
+
+Surfaced during Phase 5 session 5.8. Drill-through destination page "Item Detail" was created and hidden, drill-through field well wired with DIM_ITEM[ITEM_ID], "Allow drill through when = Used as category", Keep all filters Off, Cross-report Off. Source visual on Demand by Hierarchy was a Table with DIM_ITEM[ITEM_ID] in Columns well (lineage confirmed via tooltip showing 'DIM_ITEM'[ITEM_ID]). File saved + full close+reopen attempted.
+
+**Symptom.** Right-click on an ITEM_ID value in the source table showed the standard context menu (Copy / Show as table / Include / Exclude / Group / Summarize / New visual calculation / Set up a verified answer / Customize total calculation) — but NO **Drill through** option.
+
+**Diagnostics attempted (all checked, none resolved the issue):**
+
+- Page hidden vs unhidden — same result
+- Right-click on ITEM_ID text cell directly vs on revenue cell vs on total row — same result
+- Allow drill through when = Used as category (verified, didn't change)
+- Keep all filters Off (verified)
+- Cross-report Off (verified)
+- Source visual ITEM_ID lineage = DIM_ITEM[ITEM_ID] (verified via tooltip)
+- Save → close PBI Desktop → reopen (verified, didn't resolve)
+- Page type dropdown in Page information — NOT EXPOSED in this user's variant (only Set as landing page / Allow use as tooltip / Allow Q&A — no "Drillthrough" page type toggle; community thread on this control as the #1 cause didn't apply to this variant)
+
+**Resolution:** drill-through was PULLED from session 5.8 scope. Item Detail destination page deleted. The cost-benefit on continuing to chase a variant-specific UI issue versus moving on to the remaining 5.8 items was not worth it for a portfolio piece focused on the data engineering story. PBI's automatic cross-filtering (left-click on a value in one visual filters all other visuals on the same page) gives most of the interactive value already, without the drill-through wiring complexity.
+
+**Carry-forward discipline:**
+
+- When drill-through right-click trigger fails despite spec-correct wiring in a free stock Desktop variant, the community-cited "Page type = Drillthrough" fix may not apply (the toggle may not exist in all variants — Page information section only exposed Allow use as tooltip / Allow Q&A / Set as landing page in this user's case). Investigation beyond this point requires screen-sharing for variant-specific diagnosis.
+- Recommend treating drill-through as a "nice-to-have polish item" with a hard time-cap on debugging (e.g., 30 minutes). If not firing after spec-correct wiring + close+reopen, pull from scope rather than burning hours.
+- See related carry-forward rule above: test drill-through EARLY with minimal visuals, before investing in source-visual formatting.
+
+### 2026-05-22 — Power BI cyclic reference revisit: not always spurious cache — can also be real Power Query M-code self-reference
+
+Update / refinement to the 2026-05-20 (session 5.5) LEARNING that locked cyclic reference errors as "almost always spurious cache desync, save+close+reopen fixes it."
+
+5.8 surfaced a second occurrence of the same `"A cyclic reference was encountered during evaluation"` error pattern, this time on DIM_ITEM and DIM_STORE after a Power Query Replace Values transformation was applied to MART_FORECAST_VS_ACTUAL.SERIES_TYPE (renaming categorical values "actual" → "Actual", "forecast" → "Forecast"). The save+close+reopen path from 5.5 didn't always clear it on first attempt.
+
+**Two distinct causes for the same error message:**
+
+1. **Spurious cache desync** (5.5 pattern) — save+close+reopen clears instantly. Common after refresh / model changes / measure edits.
+2. **Real Power Query M-code self-reference** (5.8 pattern) — a Replace Values step (or any Table.* transformation) references the query name itself instead of `#"PreviousStepName"` in the first argument. Self-reference creates a real evaluation loop that close+reopen cannot fix. Pattern: `= Table.ReplaceValue(QueryName, ...)` instead of `= Table.ReplaceValue(#"PreviousStep", ...)`. The Replace Values UI sometimes auto-generates the self-reference form depending on user actions.
+
+**Updated diagnostic order for "cyclic reference" errors:**
+
+1. Save + close PBI Desktop + reopen — clears spurious cache cases (5.5 pattern, fast)
+2. If error persists after reopen → open Power Query Editor → click each affected table in the left panel → for each Applied Step, look at the formula bar M code → first argument must be `#"PreviousStepName"` (a step name with `#""` wrapper), NOT the query name directly
+3. If a step references the query name, edit the formula bar to reference the prior step name → Close & Apply
+4. If still failing, more involved tracing (Query Dependencies graph, calculated columns, relationship audit) per crossjoin.co.uk / community.fabric.microsoft.com diagnostic patterns
+
+Source: [community.fabric.microsoft.com — Cyclic ref Replace Values self-reference pattern](https://community.fabric.microsoft.com/t5/Desktop/quot-A-cyclic-reference-was-encountered-during-evaluation-quot/m-p/3425258)
+
+**Carry-forward:** treat cyclic ref as a two-cause symptom, not a single one. Cheapest diagnostic first (close+reopen), then M-code inspection if needed.
+
+### 2026-05-22 — Power Query Replace Values is the ONLY stock-Desktop path for renaming categorical column values
+
+Surfaced during Phase 5 session 5.8. User had a matrix with column headers driven by a categorical column SERIES_TYPE containing values "actual" and "forecast" (lowercase per dbt convention propagated through Snowflake unquoted-identifier UPPERCASE values). Wanted those headers to display as "Actual" / "Forecast" (properly cased).
+
+**Paths investigated:**
+
+- **In-visual "Rename for this visual"** → works for measure pills in field wells (e.g., renaming a Total Revenue (Mart) measure header to "Revenue"), but does NOT work for category values that drive column headers via a Columns field well. Confirmed via community.fabric.microsoft.com thread: "currently for matrix visual, there is no support for dynamically changing column names, and it is not possible for the headers to be dynamic."
+- **Data View / Table View in-place edit** → not supported, PBI Desktop Table View is read-only for cell values
+- **DAX calculated column with SWITCH** → works (creates a new column returning "Actual" / "Forecast" based on SERIES_TYPE value), bind matrix Columns well to the new column. Adds a column to the model.
+- **Data Groups** → works, but creates a "(groups)" version of the field with similar overhead as a calc column
+- **Power Query Replace Values** → modifies the existing column's data at load time. No new column created. Cleanest, community-recommended path. Requires opening Power Query Editor (Home → Transform data) and re-applying via Close & Apply (model refresh wait).
+- **Update at dbt source layer** → best long-term but biggest commit; rebuild required
+
+**Chosen path in 5.8:** Power Query Replace Values. Worked correctly; matrix redrew with "Actual" / "Forecast" / "Total" properly cased.
+
+**Carry-forward discipline:**
+
+- For categorical value renames in PBI semantic models, Power Query Replace Values is the cleanest stock-Desktop path. Confirmed by Fabric Community: there is no in-visual rename mechanism for category values driving column headers.
+- For Project #3's Data Vault scenarios, decide at dbt source layer whether values like "actual" / "forecast" / "active" / "inactive" should be properly-cased at source (Snowflake/Databricks string functions) OR at the BI layer via Power Query. Source-side fix is more durable; BI-side fix is faster iteration.
+
+Sources:
+- [community.fabric.microsoft.com — Rename column header in matrix when column represents column value](https://community.fabric.microsoft.com/t5/Desktop/rename-a-column-header-in-matrix-visual-when-column-represents/m-p/3077461)
+
+### 2026-05-22 — PBI transformation layer hierarchy: do data cleanup as close to source as possible (dbt → Power Query → DAX → visual)
+
+Surfaced as a meta-pattern from 5.8 retrospective. Across the session we made multiple data-shaping decisions and didn't always pick the right layer. Locking the hierarchy explicitly.
+
+**The layered transformation hierarchy (do cleanup at the LOWEST layer possible):**
+
+1. **Source layer (dbt models / SQL transforms in Snowflake/Databricks/Postgres)** — best for stable, reusable transforms consumed by multiple downstream systems (PBI + ad-hoc SQL + other BI tools). Examples: properly-cased categorical values, derived calendar attributes, conformed dimensions, business-rule-driven boolean flags. If "actual"/"forecast" should be properly-cased everywhere, fix in dbt — then PBI inherits the clean values for free.
+2. **Power Query (M) at PBI load time** — second best, for PBI-specific transforms that should happen automatically on every refresh. Examples: Replace Values for casing fixes; Remove Columns for fields PBI doesn't need; Change Type for numeric/date conversions; Merge/Append for combined sources; Conditional Column for derived text. Persists across refreshes. No model-side overhead. Slower to build but faster runtime than calc columns.
+3. **DAX calculated columns** — only when row context is needed AND Power Query can't handle the same transform (rare — PQ Conditional Column covers most cases). Calc columns recalculate on every model refresh and consume VertiPaq memory. Examples where calc column IS the right tool: time intelligence patterns referencing related measures, complex DAX patterns that can't be expressed in M.
+4. **DAX measures** — for dynamic aggregations evaluated at query time, not for data cleanup. Measures should compute, not rename.
+5. **Visual-level (Filter pane, Rename for this visual, custom format strings)** — last resort, only for per-visual customization that doesn't generalize. "Rename for this visual" is a presentation-layer fix, not a data fix.
+
+**Concrete examples from 5.8 — what we did vs what would be better:**
+
+- **Did right:** Power Query Replace Values for SERIES_TYPE column on MART_FORECAST_VS_ACTUAL (actual → Actual, forecast → Forecast). Persists across refreshes, no calc column overhead, source data layer (dbt) untouched. Even better would be fixing at dbt source, but PQ is the right second choice.
+- **Could have done better:** Day Type and SNAP Day Type calc columns on DIM_CALENDAR returning "Weekend"/"Weekday" and "SNAP Day"/"Non-SNAP Day" text. These could equally have been Power Query Conditional Columns on DIM_CALENDAR's M query — same result, slightly lighter VertiPaq footprint, transform lives in the load-time query graph rather than the model. For project consistency though, having all DIM_CALENDAR derived attrs as calc columns is also defensible. Trade-off: PQ keeps the M code graph cleaner; calc columns are easier to edit in PBI without leaving the model view.
+- **Best path for Project #3:** push these transforms upstream into dbt where possible (the dim_calendar model can include `day_type` and `snap_day_type` columns natively). PBI then imports clean, semantically-named columns and skips both the PQ step AND the calc column step. Source-side transformations are also reusable for non-PBI consumers (ad-hoc SQL, other BI tools, ML pipelines).
+
+**Other Power Query disciplines worth practicing in Project #3:**
+
+- **Remove unused columns at load time.** Power Query → right-click column header → Remove. Reduces .pbix size, improves refresh speed, keeps the Data pane uncluttered. Doing this at PBI side instead of dbt side is fine when the dbt model is consumed by multiple downstream tools that need different column subsets.
+- **Change column types explicitly.** Power Query auto-detects types but the detection isn't always right (e.g., a numeric ID column might be inferred as decimal when it should be whole number; a date string might come in as text). Explicit Change Type steps make the model more deterministic.
+- **Rename columns for human readability at load.** snake_case from dbt → human-readable headers in Power Query (e.g., `total_revenue_usd` → `Revenue`). Centralizes the renaming so every visual using that column inherits the friendly name. Beats Rename for this visual which only fixes one visual.
+- **Filter at load time, not visual time.** If certain rows should never appear in PBI (e.g., test data, soft-deleted records), filter them out in Power Query — not via Filter pane on every visual.
+
+**Carry-forward discipline for Project #3:**
+
+- Default: cleanup transforms in dbt at source. If not possible, Power Query at load time. DAX only when M can't express it. Visual-level only for per-visual presentation tweaks.
+- Project #3's POWERBI_PLAYBOOK should include a "Power Query checklist at load time" section: rename columns to human-friendly names; remove unused columns; explicit type conversions; replace casing/text inconsistencies; document any non-obvious Power Query steps in M comments.
+- Make this a mandatory step in the PBI build order — happens AFTER Get Data, BEFORE building any visuals. Easier to maintain clean transforms when the model loads correctly from day 1 vs retrofitting later.
+
+### 2026-05-22 — DAX Studio External Tools registration requires "Install for all users" — per-user install doesn't expose the ribbon tab
+
+Surfaced during Phase 5 session 5.8 when setting up VertiPaq Analyzer for the model-size talk-track artifact. Installed DAX Studio (latest), chose "Install for me only" to avoid admin prompt, ticked "Register as External Tool for Power BI" during install. After reopening PBI Desktop with the .pbix loaded, the **External Tools ribbon tab did not appear**.
+
+**Root cause** (per community.fabric.microsoft.com): the per-user install path places `daxstudio.pbitool.json` in `%LOCALAPPDATA%\DAX Studio\` instead of the all-users path `C:\Program Files (x86)\Common Files\Microsoft Shared\Power BI Desktop\External Tools\` which is where PBI Desktop scans for external tool registrations. Per-user install completes successfully but the registration file is in the wrong location for PBI Desktop's discovery.
+
+**Two verified fixes:**
+
+1. Reinstall DAX Studio choosing **"Install for all users"** (requires admin / UAC prompt). Registration file lands in the correct scanned path. External Tools tab appears.
+2. Manually copy `daxstudio.pbitool.json` from `%LOCALAPPDATA%\DAX Studio\` into the all-users Common Files path above (needs admin to write to Program Files).
+
+**Workaround if neither admin path is available:**
+
+Launch DAX Studio standalone from Start Menu → in the Connect dialog → select the **Power BI / SSDT Model** radio button → it detects running PBI Desktop instances dynamically. Loses the convenience of one-click launch from External Tools ribbon but functionally equivalent.
+
+Source: [community.fabric.microsoft.com — External Tools Ribbon Missing](https://community.fabric.microsoft.com/t5/Desktop/External-Tools-Ribbon-Missing/td-p/3196052)
+
+**Carry-forward:** for Project #3, when installing external tools (Tabular Editor, DAX Studio, Bravo for Power BI, ALM Toolkit), default to "Install for all users" to ensure External Tools ribbon registration. Note this in Project #3's tooling setup checklist.
+
 ### Docker
 
 _(to be populated as encountered — containerisation patterns, docker-compose,
