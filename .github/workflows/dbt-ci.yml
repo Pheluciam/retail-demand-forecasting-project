@@ -1,20 +1,25 @@
 # =============================================================================
 # dbt CI — parse + sqlfluff lint
 # =============================================================================
-# Pre-merge quality gate for the dbt project. Two checks run without needing
-# Snowflake credentials:
+# Pre-merge quality gate for the dbt project. Two checks:
 #
 #   1. `dbt parse` — compiles every model + macro, catches Jinja errors,
 #      missing ref()/source() targets, circular dependencies, schema test
-#      misconfigurations. No DB connection required (parse only).
+#      misconfigurations. Uses dummy env vars — `dbt parse` validates the
+#      profile templates but never opens a connection.
 #
 #   2. `sqlfluff lint` — Snowflake-dialect SQL style check across models/
-#      using the dbt/.sqlfluff config. Catches keyword case violations,
-#      malformed CTEs, indentation drift.
+#      using the dbt/.sqlfluff config. Uses the dbt templater so dbt_utils
+#      macros resolve cleanly. The dbt templater calls `dbt compile`, which
+#      initializes the Snowflake adapter and validates the connection — so
+#      this job needs real credentials from encrypted GitHub Secrets.
 #
-# `dbt test` is NOT in CI because it requires a live Snowflake connection
-# (would burn pay-as-you-go credits on every push). Run dbt test locally
-# before merging — see DBT_PIPELINE.md.
+# `dbt test` is NOT in CI because it would consume Snowflake credits on every
+# push. Run dbt test locally before merging — see DBT_PIPELINE.md.
+#
+# Future: if the Snowflake account is decommissioned post-portfolio shipping,
+# switch the sqlfluff-lint job to `continue-on-error: true` as a documented
+# graceful degradation. The dbt-parse job will keep passing on dummy creds.
 # =============================================================================
 
 name: dbt CI (parse + lint)
@@ -72,6 +77,20 @@ jobs:
     defaults:
       run:
         working-directory: dbt
+    env:
+      # Real Snowflake creds from encrypted GitHub Secrets. sqlfluff's dbt
+      # templater calls `dbt compile`, which initializes the Snowflake adapter
+      # and validates the connection — dummy creds fail with a 404 against
+      # the fake account hostname. GitHub Actions secrets are encrypted at
+      # rest, never logged, and rotated by the repo owner.
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,8 +100,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install sqlfluff
-        run: pip install "sqlfluff>=3.0.0"
+      - name: Install dbt + sqlfluff + sqlfluff-templater-dbt
+        run: |
+          pip install dbt-core==1.11.10 dbt-snowflake==1.11.5
+          pip install "sqlfluff>=3.0.0" "sqlfluff-templater-dbt>=3.0.0"
+
+      - name: dbt deps
+        run: dbt deps
 
       - name: sqlfluff lint
         run: sqlfluff lint models/
