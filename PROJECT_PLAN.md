@@ -2,13 +2,13 @@
 
 > Working document for Project #2 of the data engineering portfolio.
 > Architecture diagram and overview are employer-shareable.
-> Created: 2026-05-09. Last meaningfully updated: 2026-05-15 (Phase 3 in flight).
+> Created: 2026-05-09. Last meaningfully updated: 2026-05-22 (Phase 6 closed — v1.0 shipped).
 
 ---
 
 ## At a glance
 
-A **production-grade retail demand-planning analytics platform** built end-to-end on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 dataset) is ingested from MS SQL Server into a Snowflake cloud warehouse via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
+A **production-grade retail demand-planning analytics platform** built end-to-end on a hybrid Microsoft + modern-data-stack architecture. Real Walmart sales data (M5 dataset) is ingested from Azure SQL Database into a Snowflake cloud warehouse via scheduled Airflow jobs, transformed through a partitioned star schema with dedicated marts using dbt, and surfaced as a five-page Power BI dashboard for an operations / S&OP audience.
 
 **The headline:** orchestration. The pipeline runs end-to-end on a schedule, with proper failure handling, tests, and CI — not button-pressed like Project #1.
 
@@ -27,7 +27,7 @@ A **production-grade retail demand-planning analytics platform** built end-to-en
 ```mermaid
 flowchart LR
     K["Kaggle M5<br/>Public Dataset"]
-    MS[("MS SQL Server<br/>OLTP Source")]
+    MS[("Azure SQL Database<br/>OLTP Source")]
     AF["Apache Airflow<br/>Docker"]
     SF[("Snowflake<br/>Cloud Warehouse")]
     DBT["dbt<br/>Transformations"]
