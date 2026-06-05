@@ -14,7 +14,7 @@
 |---|---|---|
 | Project #1 — CDC NT Transport (dbt-first analytics project) | ✅ Done | Reference: `C:\dbt\cdc_nt_gtfs\` |
 | **Project #2 — Retail Demand & Forecasting Pipeline** (this repo) | ✅ **v1.0 SHIPPED 2026-05-22** | All 6 phases complete: Azure SQL → Snowflake → dbt → Cortex ML forecast → 5-page Power BI dashboard. CI shipped (ruff F821 + dbt parse + sqlfluff). |
-| Project #3 — Financial markets pipeline (Databricks lakehouse + Data Vault 2.0) | 📋 Planned — stack locked 2026-05-19; ready to start | See "Project #3 — locked stack" section below |
+| Project #3 — S&P 100 Financial Analytics Lakehouse (AWS-native + Data Vault 2.0) | ✅ **v1.0 SHIPPED** | AWS S3 + Glue + Athena + Iceberg, dbt-athena, Step Functions, 6-page Power BI, keyless OIDC CI/CD. Repo: `financial-analytics-lakehouse-project` |
 | **Post-Project #3 — 6-8 week DE training journey** | 📋 Planned — design locked 2026-05-19 | Broader than the original Python-only block. See below |
 | Subsequent projects | 🤔 TBD | Depends on job search outcome and direction |
 
@@ -23,6 +23,8 @@
 ## Project #3 — locked stack
 
 Stack locked 2026-05-19. Builds on Project #2 muscle where useful, intentionally differentiates where portfolio variety pays off. Three projects, three distinct modeling stories.
+
+> **Update (2026-06-05) — plan changed in build.** Project #3 shipped **AWS-native** (S3 + Glue + Athena + Apache Iceberg, dbt-athena, AWS Step Functions, keyless GitHub OIDC CI/CD) on **SEC EDGAR / S&P 100** financial data, in repo `financial-analytics-lakehouse-project` — not the Databricks / financial-markets plan captured below. **Data Vault 2.0 modeling held.** The original locked plan is left below as a record of the decision at the time.
 
 **Repo / folder name (locked).** `financial-markets-pipeline-project` — under `C:\Users\Phil\Documents\Claude\Projects\`. Mirrors Project #2's `-project` suffix convention. Locked early to avoid mid-project folder rename causing Snowflake / Power BI / Git connection breakage (lesson from Project #2 Phase 0).
 

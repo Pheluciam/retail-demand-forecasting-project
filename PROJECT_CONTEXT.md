@@ -10,7 +10,7 @@
 >
 > All six phases complete. End-to-end pipeline operational: Azure SQL → Snowflake `RAW` → dbt `STAGING` / `INTERMEDIATE` / `WAREHOUSE` / `MARTS` → Snowflake Cortex ML forecast → 5-page Power BI dashboard. Pipeline smoke-tested across 2 fresh dates at 5.9 close, all 4 tasks green end-to-end. Documentation + ship pass closed at Phase 6: README has 5 page screenshots + future-revival paragraph; POWERBI_PIPELINE.md is a 326-line walkthrough matching EXTRACT_PIPELINE / DBT_PIPELINE depth; CI workflows shipped (ruff F821 + dbt parse + sqlfluff). v1.0 git tag at Phase 6 close.
 >
-> **Carry-forward to Project #3 (Data Vault / streaming) — the rules and patterns that earned their keep across Phase 5-6:**
+> **Carry-forward to Project #3 (Data Vault / AWS lakehouse) — the rules and patterns that earned their keep across Phase 5-6:**
 >
 > - 1-2 steps per response on UI walkthroughs, no walls of text
 > - Code blocks for paste-able only; plain text for read-not-copy

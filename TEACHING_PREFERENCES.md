@@ -8,8 +8,8 @@
 
 ## About me
 
-- Background: <e.g. "BI analyst, ~4 years; mostly Tableau, PostgreSQL, some Power BI">
-- Current role:
+- Background: BI / Operations Analyst — 15+ years across operations, supply chain and analytics; the last 5 in dedicated BI roles (SQL, Tableau, Power BI, stakeholder reporting).
+- Current role: Business Intelligence Analyst & Developer — building a data-engineering portfolio (dbt, Snowflake, Airflow, AWS-native lakehouse).
 - Self-rated comfort (1 = beginner, 5 = fluent):
   - SQL: 3
   - Python: 3
@@ -21,7 +21,7 @@
 
 ## What I'm trying to learn
 
-- 2-month goal: <e.g. "Build 4 - 5 data engineering projects for job interviews">
+- 2-month goal: Build 4-5 data engineering projects for job interviews.
 - Longer-term direction: Become a Data Engineer
 - Why this matters to me: Job
 
