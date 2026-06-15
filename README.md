@@ -5,7 +5,7 @@
 > transformed through a Kimball star schema with dedicated marts in dbt,
 > forecast with Snowflake Cortex, and surfaced as a five-page Power BI dashboard
 > for an operations / S&OP audience.
-> Project #2 of Phil's data engineering portfolio.
+> Project #2 of my data engineering portfolio.
 
 **Status: COMPLETE — 2026-05-22.** End-to-end and interview-ready: Azure SQL Database → Snowflake `RAW` → dbt `STAGING` / `INTERMEDIATE` / `WAREHOUSE` / `MARTS` → Snowflake Cortex ML forecast → five-page Power BI dashboard, orchestrated on an Apache Airflow (Docker) DAG with per-model lineage via Astronomer Cosmos. Full Kimball star schema (incremental `fact_daily_sales` at 32.9M rows / $100.7M revenue), two pre-aggregated marts, a 28-day Cortex forecast for ~3K items conformed into the warehouse star and UNIONed with actuals, plus GitHub Actions CI (`dbt parse` + `sqlfluff` + `ruff` F821). Full build history, design decisions and the lessons log live in `PROJECT_CONTEXT.md` and `LEARNINGS.md`.
 
@@ -167,11 +167,14 @@ forecast by category.
 
 ## Related projects
 
-Part of a three-project data-engineering portfolio:
+Part of my data-engineering portfolio — focused builds first, then full end-to-end platforms:
 
-- **Project #1 — CDC NT Transport Analytics** — dbt-first pipeline on PostgreSQL → Power BI; Kimball modelling foundation.
-- **Project #2 — Retail Demand & Forecasting** *(this one)* — cloud warehouse + orchestration: Azure SQL → Snowflake → Airflow (Docker) → dbt → Power BI, with a Cortex forecast layer.
-- **Project #3 — S&P 100 Financial Analytics Lakehouse** — AWS-native lakehouse: S3 + Glue + Athena + Iceberg, dbt-athena, Step Functions, 6-page Power BI, keyless OIDC CI/CD.
+- **Focused Build 1 — [operations-analytics-dbt-tableau-project](https://github.com/Pheluciam/operations-analytics-dbt-tableau-project)** — dbt testing + macros depth on a warehouse-distribution slice; PostgreSQL → dbt → Tableau.
+- **Focused Build 2 — [analytics-tsql-adf-project](https://github.com/Pheluciam/analytics-tsql-adf-project)** — Jira REST → Azure Data Factory → Azure SQL → T-SQL star schema → Power BI.
+- **Focused Build 3 — [health-analytics-fabric-project](https://github.com/Pheluciam/health-analytics-fabric-project)** — Microsoft Fabric end-to-end: AIHW MyHospitals API → Lakehouse medallion → PySpark star schema → Power BI.
+- **End-to-End Platform 1 — [cdc-nt-gtfs-project](https://github.com/Pheluciam/cdc-nt-gtfs-project)** — dbt-first pipeline on PostgreSQL → Power BI; Kimball modelling foundation.
+- **End-to-End Platform 2 — retail-demand-forecasting-project** *(this one)* — Azure SQL → Snowflake → Airflow (Docker) → dbt → Power BI, with a Cortex forecast layer.
+- **End-to-End Platform 3 — [financial-analytics-lakehouse-project](https://github.com/Pheluciam/financial-analytics-lakehouse-project)** — AWS-native lakehouse: S3 + Glue + Athena + Iceberg, dbt-athena, Step Functions, 6-page Power BI, keyless OIDC CI/CD.
 
 ## Author
 
